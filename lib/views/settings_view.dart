@@ -153,11 +153,6 @@ class _SettingsViewState extends State<SettingsView> {
                             color: Colors.white,
                           ),
                         ),
-                        SizedBox(height: 4),
-                        Text(
-                          '在此配置您的大模型 API 密钥、博客发布密钥以及定制化的 AI 抓取 Prompt',
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
                       ],
                     ),
                   ),

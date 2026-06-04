@@ -82,7 +82,7 @@ class CollectorProvider with ChangeNotifier {
     _addLog('INFO', '开始单篇采集任务，目标 URL: $url');
     
     try {
-      final success = await _processSingleArticleUrl(url);
+      final success = await _processSingleArticleUrl(url, useRandomDelay: false);
       if (success) {
         _completedTaskCount = 1;
         _addLog('SUCCESS', '单篇采集完成并已存入数据库！');
@@ -134,7 +134,7 @@ class CollectorProvider with ChangeNotifier {
         _addLog('INFO', '正在解析列表页 (第 $currentPage 页): $currentUrl');
         
         try {
-          final html = await _extractor.fetchHtml(currentUrl);
+          final html = await _extractor.fetchHtml(currentUrl, useRandomDelay: true);
           final cleanedHtml = _extractor.cleanHtmlForList(html);
           
           final result = await _llmService.extractList(cleanedHtml, promptList);
@@ -184,7 +184,7 @@ class CollectorProvider with ChangeNotifier {
         _addLog('INFO', '正在采集第 (${i + 1}/$_totalTaskCount) 篇: $targetUrl');
 
         try {
-          final success = await _processSingleArticleUrl(targetUrl);
+          final success = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
           if (success) {
             _completedTaskCount++;
             _addLog('SUCCESS', '采集成功: 第 (${i + 1}/$_totalTaskCount) 篇');
@@ -212,11 +212,11 @@ class CollectorProvider with ChangeNotifier {
   /// 封装单篇 URL 的核心处理逻辑（网页抓取 -> 清洗 -> 大模型提取 -> 存入数据库）
   /// 
   /// 供单篇和批量采集方法共同调用。
-  Future<bool> _processSingleArticleUrl(String url) async {
+  Future<bool> _processSingleArticleUrl(String url, {bool useRandomDelay = false}) async {
     final promptSingle = await _db.getSetting('prompt_single');
 
     // 1. 抓取 HTML 源码
-    final html = await _extractor.fetchHtml(url);
+    final html = await _extractor.fetchHtml(url, useRandomDelay: useRandomDelay);
 
     // 2. 清洗 HTML，只保留必要的内容结构
     final cleanedHtml = _extractor.cleanHtmlForSingleArticle(html);

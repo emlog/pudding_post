@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:html/parser.dart' as parser;
 import 'package:html/dom.dart';
 
@@ -6,20 +8,64 @@ import 'package:html/dom.dart';
 /// 
 /// 负责对目标 URL 发起网络请求获取网页源代码，并使用 html 库对 DOM 树进行精简和标签清洗，以减少发送给大模型的 Token 数量。
 class ExtractorService {
+  // 预置的常见真实浏览器 User-Agent 及对应的 Client Hints 头，用于规避反爬检测
+  static final List<Map<String, dynamic>> _uaTemplates = [
+    {
+      'ua': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'hints': {
+        'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+      }
+    },
+    {
+      'ua': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'hints': {
+        'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"macOS"',
+      }
+    },
+    {
+      'ua': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Edge/122.0.0.0',
+      'hints': {
+        'sec-ch-ua': '"Chromium";v="122", "Microsoft Edge";v="122", "Not(A:Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+      }
+    },
+    {
+      'ua': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+      'hints': <String, String>{}
+    },
+    {
+      'ua': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+      'hints': <String, String>{}
+    }
+  ];
+
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 15),
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    },
   ));
 
   /// 根据提供的 URL 抓取网页 HTML 源代码
   /// 
   /// 使用 Dio 发起 HTTP GET 请求，获取网页源码并返回字符串。如果出错则抛出异常。
-  Future<String> fetchHtml(String url) async {
+  /// 支持随机生成拟真 Headers 规避封禁，并支持随机退避延时。
+  Future<String> fetchHtml(String url, {bool useRandomDelay = false}) async {
+    if (useRandomDelay) {
+      // 随机延迟 1 到 3 秒，模拟真人阅读延时，防频率封锁
+      final delayMs = 1000 + (DateTime.now().millisecondsSinceEpoch % 2000);
+      await Future.delayed(Duration(milliseconds: delayMs));
+    }
     try {
-      final response = await _dio.get(url);
+      // 动态生成符合该 URL 域名的随机 UA 及 Client Hints Headers，伪装浏览器请求特征
+      final headers = _generateRandomHeaders(url);
+      final response = await _dio.get(
+        url,
+        options: Options(headers: headers),
+      );
       return response.data.toString();
     } catch (e) {
       throw Exception('网页抓取失败: $e');
@@ -158,5 +204,58 @@ class ExtractorService {
       port: uri.port == 0 ? null : uri.port,
       pathSegments: pathSegments,
     ).toString();
+  }
+
+  /// 随机获取一个浏览器的完整请求头，包括 User-Agent 和相匹配的 Client Hints，以提高反爬通过率
+  Map<String, String> _generateRandomHeaders(String targetUrl) {
+    final random = DateTime.now().millisecondsSinceEpoch % _uaTemplates.length;
+    final template = _uaTemplates[random];
+    final String ua = template['ua'] as String;
+    final Map<String, String> hints = Map<String, String>.from(template['hints'] as Map? ?? {});
+
+    final uri = Uri.parse(targetUrl);
+
+    final headers = {
+      'User-Agent': ua,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+    };
+
+    if (hints.isNotEmpty) {
+      headers.addAll(hints);
+    }
+
+    // 自动添加 Host 和 Referer，进一步增强真实性
+    headers['Host'] = uri.host;
+    
+    return headers;
+  }
+
+  /// 设置代理服务器，格式为 "host:port"，例如 "127.0.0.1:7890"
+  /// 
+  /// 传入空值（null 或空字符串）则恢复直连模式
+  void setProxy(String? proxyUrl) {
+    if (proxyUrl == null || proxyUrl.isEmpty) {
+      _dio.httpClientAdapter = IOHttpClientAdapter(); // 恢复默认直连
+      return;
+    }
+    _dio.httpClientAdapter = IOHttpClientAdapter(
+      createHttpClient: () {
+        final client = HttpClient();
+        client.findProxy = (uri) {
+          return 'PROXY $proxyUrl';
+        };
+        // 忽略 SSL 证书校验，防止因为代理导致证书报错
+        client.badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+        return client;
+      },
+    );
   }
 }

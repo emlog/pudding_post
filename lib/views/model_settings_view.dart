@@ -288,11 +288,6 @@ class _ModelSettingsViewState extends State<ModelSettingsView> {
                           color: Colors.white,
                         ),
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        '在此添加和管理您所使用的多款 AI 大语言模型。支持同时添加多个大模型，并可随时一键开启或关闭指定模型。',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
                     ],
                   ),
                 ),

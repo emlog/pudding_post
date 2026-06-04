@@ -43,6 +43,7 @@ class MyApp extends StatelessWidget {
         title: '布丁发布 - AI文章智能采集发布助手',
         debugShowCheckedModeBanner: false,
         theme: _buildDarkTheme(),
+        themeMode: ThemeMode.dark,
         home: const HomeScreen(),
       ),
     );

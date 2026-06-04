@@ -126,11 +126,6 @@ class _CollectorViewState extends State<CollectorView> {
                     color: Colors.white,
                   ),
                 ),
-                SizedBox(height: 4),
-                Text(
-                  '输入目标文章 URL 或列表页 URL，大模型将自动结构化并抓取文章内容',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
               ],
             ),
             const SizedBox(height: 24),
