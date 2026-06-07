@@ -5,7 +5,7 @@ import '../services/publish_service.dart';
 
 /// 内容库中文章管理及发布状态管理 Provider
 /// 
-/// 提供本地文章列表的加载、搜索过滤、编辑修改、删除归档，并集成发布服务完成将文章同步至 emlog 博客系统的功能。
+/// 提供本地文章列表的加载、搜索过滤、编辑修改、删除归档，并集成发布服务完成将文章同步至 emlog 系统的功能。
 class ArticleProvider with ChangeNotifier {
   final _db = DatabaseService.instance;
   final _publishService = PublishService();
@@ -101,7 +101,7 @@ class ArticleProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// 加载 emlog 博客系统的分类列表
+  /// 加载 emlog 系统的分类列表
   /// 
   /// 供发布对话框调用，展示并选择分类。
   Future<void> loadCategories() async {
@@ -118,7 +118,7 @@ class ArticleProvider with ChangeNotifier {
     }
   }
 
-  /// 发布单篇文章至 emlog 博客系统
+  /// 发布单篇文章至 emlog 系统
   /// 
   /// 传入文章 ID 和分类 ID。发布成功后，自动将数据库及内存中对应的文章状态更新为“已发布”，并保存返回的链接。
   Future<void> publishArticle(int articleId, String sortId) async {

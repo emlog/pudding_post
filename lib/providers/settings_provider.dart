@@ -66,9 +66,59 @@ class LlmModelConfig {
   }
 }
 
+/// 采集网址分组配置项实体
+class UrlGroup {
+  final String id;
+  final String name;
+  final List<String> urls;
+  final String createdAt;
+
+  UrlGroup({
+    required this.id,
+    required this.name,
+    required this.urls,
+    required this.createdAt,
+  });
+
+  /// 拷贝并创建新的 UrlGroup 对象
+  UrlGroup copyWith({
+    String? id,
+    String? name,
+    List<String>? urls,
+    String? createdAt,
+  }) {
+    return UrlGroup(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      urls: urls ?? this.urls,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  /// 序列化为 Map 数据格式
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'urls': urls,
+      'createdAt': createdAt,
+    };
+  }
+
+  /// 从 Map 反序列化构建 UrlGroup 对象
+  factory UrlGroup.fromMap(Map<String, dynamic> map) {
+    return UrlGroup(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      urls: List<String>.from(map['urls'] ?? []),
+      createdAt: map['createdAt'] ?? '',
+    );
+  }
+}
+
 /// 应用程序配置状态管理 Provider
 /// 
-/// 负责在内存中维护大模型 API 配置列表、Emlog 博客配置以及 AI 提取 Prompt，并提供一键保存及连接测试接口。
+/// 负责在内存中维护大模型 API 配置列表、Emlog 配置以及 AI 提取 Prompt，并提供一键保存及连接测试接口。
 class SettingsProvider with ChangeNotifier {
   final _db = DatabaseService.instance;
   final _llmService = LlmService();
@@ -81,8 +131,10 @@ class SettingsProvider with ChangeNotifier {
   String _emlogApiKey = '';
   String _promptSingle = '';
   String _promptList = '';
+  String _networkProxyUrl = '';
 
   List<LlmModelConfig> _llmModels = [];
+  List<UrlGroup> _urlGroups = [];
 
   bool _isTestingLlm = false;
   bool _isTestingEmlog = false;
@@ -95,8 +147,10 @@ class SettingsProvider with ChangeNotifier {
   String get emlogApiKey => _emlogApiKey;
   String get promptSingle => _promptSingle;
   String get promptList => _promptList;
+  String get networkProxyUrl => _networkProxyUrl;
 
   List<LlmModelConfig> get llmModels => _llmModels;
+  List<UrlGroup> get urlGroups => _urlGroups;
 
   bool get isTestingLlm => _isTestingLlm;
   bool get isTestingEmlog => _isTestingEmlog;
@@ -112,6 +166,7 @@ class SettingsProvider with ChangeNotifier {
     _emlogApiKey = await _db.getSetting('emlog_api_key', defaultValue: '');
     _promptSingle = await _db.getSetting('prompt_single', defaultValue: '');
     _promptList = await _db.getSetting('prompt_list', defaultValue: '');
+    _networkProxyUrl = await _db.getSetting('network_proxy_url', defaultValue: '');
 
     // 加载多模型列表配置
     final modelsJson = await _db.getSetting('llm_models_list', defaultValue: '');
@@ -139,12 +194,31 @@ class SettingsProvider with ChangeNotifier {
       await _db.setSetting('llm_models_list', jsonEncode(_llmModels.map((m) => m.toMap()).toList()));
     }
 
+    // 加载网址分组列表配置
+    final urlGroupsJson = await _db.getSetting('collector_url_groups', defaultValue: '');
+    if (urlGroupsJson.isNotEmpty) {
+      try {
+        final List<dynamic> list = jsonDecode(urlGroupsJson);
+        _urlGroups = list.map((item) => UrlGroup.fromMap(item as Map<String, dynamic>)).toList();
+      } catch (_) {
+        _urlGroups = [];
+      }
+    }
+
     notifyListeners();
   }
 
   /// 保存并序列化大模型配置列表到本地数据库，同时同步首个启用的大模型为当前默认接口
+  /// 
+  /// 此处加入了防空保护：若没有一个模型处于开启状态且配置列表不为空，则强制启用第一个大模型。
   Future<void> saveLlmModels(List<LlmModelConfig> models) async {
     _llmModels = models;
+    
+    // 防御性保护：确保列表中至少有一个模型被启用
+    if (_llmModels.isNotEmpty && !_llmModels.any((m) => m.isEnabled)) {
+      _llmModels[0] = _llmModels[0].copyWith(isEnabled: true);
+    }
+
     final jsonStr = jsonEncode(_llmModels.map((m) => m.toMap()).toList());
     await _db.setSetting('llm_models_list', jsonStr);
 
@@ -164,12 +238,24 @@ class SettingsProvider with ChangeNotifier {
   }
 
   /// 快捷更新指定大模型的开启/关闭启用状态
+  /// 
+  /// 采用单选互斥模式：若开启某一模型，则其余模型将自动关闭。
   Future<void> toggleModelStatus(String id, bool isEnabled) async {
+    // 防空保护：如果尝试关闭当前唯一启用的模型，直接拦截
+    if (!isEnabled) {
+      final currentlyEnabledCount = _llmModels.where((m) => m.isEnabled).length;
+      final targetModelIndex = _llmModels.indexWhere((m) => m.id == id);
+      if (targetModelIndex != -1 && _llmModels[targetModelIndex].isEnabled && currentlyEnabledCount <= 1) {
+        return;
+      }
+    }
+
     final updatedList = _llmModels.map((m) {
       if (m.id == id) {
         return m.copyWith(isEnabled: isEnabled);
       }
-      return m;
+      // 互斥协调：若当前目标模型被开启(isEnabled为true)，其它模型全部置为禁用
+      return isEnabled ? m.copyWith(isEnabled: false) : m;
     }).toList();
     await saveLlmModels(updatedList);
   }
@@ -205,6 +291,7 @@ class SettingsProvider with ChangeNotifier {
     required String emlogApiKey,
     required String promptSingle,
     required String promptList,
+    required String networkProxyUrl,
   }) async {
     _llmBaseUrl = llmBaseUrl.trim();
     _llmApiKey = llmApiKey.trim();
@@ -213,6 +300,7 @@ class SettingsProvider with ChangeNotifier {
     _emlogApiKey = emlogApiKey.trim();
     _promptSingle = promptSingle;
     _promptList = promptList;
+    _networkProxyUrl = networkProxyUrl.trim();
 
     await _db.setSetting('llm_base_url', _llmBaseUrl);
     await _db.setSetting('llm_api_key', _llmApiKey);
@@ -221,6 +309,7 @@ class SettingsProvider with ChangeNotifier {
     await _db.setSetting('emlog_api_key', _emlogApiKey);
     await _db.setSetting('prompt_single', _promptSingle);
     await _db.setSetting('prompt_list', _promptList);
+    await _db.setSetting('network_proxy_url', _networkProxyUrl);
 
     notifyListeners();
   }
@@ -259,5 +348,63 @@ class SettingsProvider with ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  // --- 网址分组管理方法 ---
+
+  /// 保存并序列化网址分组列表到本地数据库
+  Future<void> saveUrlGroups(List<UrlGroup> groups) async {
+    _urlGroups = groups;
+    final jsonStr = jsonEncode(_urlGroups.map((g) => g.toMap()).toList());
+    await _db.setSetting('collector_url_groups', jsonStr);
+    notifyListeners();
+  }
+
+  /// 新建并保存一个网址分组
+  Future<void> addUrlGroup(UrlGroup group) async {
+    final updatedList = List<UrlGroup>.from(_urlGroups)..add(group);
+    await saveUrlGroups(updatedList);
+  }
+
+  /// 根据 ID 删除指定的网址分组
+  Future<void> deleteUrlGroup(String id) async {
+    final updatedList = _urlGroups.where((g) => g.id != id).toList();
+    await saveUrlGroups(updatedList);
+  }
+
+  /// 更新指定的网址分组配置项（如重命名等）
+  Future<void> updateUrlGroup(UrlGroup updatedGroup) async {
+    final updatedList = _urlGroups.map((g) {
+      return g.id == updatedGroup.id ? updatedGroup : g;
+    }).toList();
+    await saveUrlGroups(updatedList);
+  }
+
+  /// 快速向指定分组追加一个新的目标采集网址（若网址已存在则不重复添加）
+  Future<void> addUrlToGroup(String groupId, String url) async {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty) return;
+
+    final updatedList = _urlGroups.map((g) {
+      if (g.id == groupId) {
+        if (!g.urls.contains(trimmedUrl)) {
+          return g.copyWith(urls: List<String>.from(g.urls)..add(trimmedUrl));
+        }
+      }
+      return g;
+    }).toList();
+    await saveUrlGroups(updatedList);
+  }
+
+  /// 快速从指定分组中移除一个采集网址
+  Future<void> removeUrlFromGroup(String groupId, String url) async {
+    final updatedList = _urlGroups.map((g) {
+      if (g.id == groupId) {
+        final newUrls = g.urls.where((u) => u != url).toList();
+        return g.copyWith(urls: newUrls);
+      }
+      return g;
+    }).toList();
+    await saveUrlGroups(updatedList);
   }
 }

@@ -195,4 +195,19 @@ class DatabaseService {
     final db = await database;
     return await db.delete('articles');
   }
+
+  /// 检查指定网址 (URL) 是否已经被成功采集入库过
+  /// 
+  /// 传入网址字符串，查询 articles 表是否已存在相同 source_url 的记录。
+  Future<bool> isUrlCollected(String url) async {
+    final db = await database;
+    final List<Map<String, dynamic>> res = await db.query(
+      'articles',
+      columns: ['id'],
+      where: 'source_url = ?',
+      whereArgs: [url.trim()],
+      limit: 1,
+    );
+    return res.isNotEmpty;
+  }
 }

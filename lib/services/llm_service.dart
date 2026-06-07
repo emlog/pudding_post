@@ -162,6 +162,14 @@ class LlmService {
     }
 
     rawJson = rawJson.trim();
+    
+    // 双重加固：自动寻找首个 '{' 与最后一个 '}'，以剥离大模型返回的引导用语或多余废话
+    final start = rawJson.indexOf('{');
+    final end = rawJson.lastIndexOf('}');
+    if (start != -1 && end != -1 && end > start) {
+      rawJson = rawJson.substring(start, end + 1);
+    }
+
     try {
       return jsonDecode(rawJson) as Map<String, dynamic>;
     } catch (e) {

@@ -9,7 +9,7 @@ import '../widgets/custom_button.dart';
 
 /// 内容库页面 View
 /// 
-/// 展示已采集的文章列表，支持模糊检索、文章在线 Markdown 编辑、单篇物理删除及发布至 emlog 博客系统的交互操作。
+/// 展示已采集的文章列表，支持模糊检索、文章在线 Markdown 编辑、单篇物理删除及发布至 emlog 系统的交互操作。
 class LibraryView extends StatefulWidget {
   const LibraryView({super.key});
 
@@ -206,7 +206,7 @@ class _LibraryViewState extends State<LibraryView> {
                 children: [
                   Icon(Icons.rocket_launch, color: Color(0xFF00C9FF), size: 20),
                   SizedBox(width: 8),
-                  Text('发布文章到 Emlog 博客', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  Text('发布文章到 Emlog', style: TextStyle(color: Colors.white, fontSize: 16)),
                 ],
               ),
               content: SizedBox(
@@ -290,7 +290,7 @@ class _LibraryViewState extends State<LibraryView> {
     );
   }
 
-  /// 批量发布选中文章至 emlog 博客
+  /// 批量发布选中文章至 emlog
   /// 
   /// 获取 emlog 分类列表并弹出精美 Dialog。确认后循环执行发布任务。
   Future<void> _showBatchPublishDialog() async {
@@ -453,7 +453,7 @@ class _LibraryViewState extends State<LibraryView> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定批量删除', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('确定', style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -497,12 +497,15 @@ class _LibraryViewState extends State<LibraryView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _isBatchMode ? '批量选择中 (${_selectedIds.length})' : '采集内容库',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                      Flexible(
+                        child: Text(
+                          _isBatchMode ? '批量选择中 (${_selectedIds.length})' : '采集内容库',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       Row(
@@ -554,6 +557,11 @@ class _LibraryViewState extends State<LibraryView> {
                               ),
                             ] else ...[
                               TextButton(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
                                 onPressed: () {
                                   final allIds = provider.articles.map((e) => e.id!).toList();
                                   setState(() {
@@ -571,12 +579,22 @@ class _LibraryViewState extends State<LibraryView> {
                               ),
                               const SizedBox(width: 4),
                               TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
                                 onPressed: _showBatchPublishDialog,
                                 icon: const Icon(Icons.rocket_launch, color: Color(0xFF00C9FF), size: 14),
                                 label: const Text('发布', style: TextStyle(color: Color(0xFF00C9FF), fontSize: 11)),
                               ),
                               const SizedBox(width: 4),
                               TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
                                 onPressed: _batchDeleteArticles,
                                 icon: const Icon(Icons.delete_outline, color: Color(0xFFFA6262), size: 14),
                                 label: const Text('删除', style: TextStyle(color: Color(0xFFFA6262), fontSize: 11)),
@@ -852,7 +870,7 @@ class _LibraryViewState extends State<LibraryView> {
                                 Row(
                                   children: [
                                     _buildActionTab(text: '详情预览', isActive: !_isEditing, onTap: _cancelEditing),
-                                    _buildActionTab(text: '源码编辑', isActive: _isEditing, onTap: _startEditing),
+                                    _buildActionTab(text: '编辑', isActive: _isEditing, onTap: _startEditing),
                                   ],
                                 ),
                                 // 发布与删除工具
@@ -874,7 +892,7 @@ class _LibraryViewState extends State<LibraryView> {
                                       ),
                                       const SizedBox(width: 12),
                                       CustomButton(
-                                        text: _selectedArticle!.publishStatus == 1 ? '重新发布博客' : '发布到博客',
+                                        text: _selectedArticle!.publishStatus == 1 ? '重新发布' : '发布',
                                         icon: Icons.upload_file,
                                         width: 120,
                                         height: 36,
@@ -923,7 +941,7 @@ class _LibraryViewState extends State<LibraryView> {
 
   /// 详情工具栏左侧 Tab 块
   /// 
-  /// 切换源码编辑与排版预览。
+  /// 切换编辑与排版预览。
   Widget _buildActionTab({
     required String text,
     required bool isActive,
@@ -931,6 +949,7 @@ class _LibraryViewState extends State<LibraryView> {
   }) {
     return InkWell(
       onTap: onTap,
+      mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.circular(6),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -974,6 +993,7 @@ class _LibraryViewState extends State<LibraryView> {
             Expanded(
               child: InkWell(
                 onTap: () => _launchUrl(_selectedArticle!.sourceUrl),
+                mouseCursor: SystemMouseCursors.click,
                 child: Text(
                   _selectedArticle!.sourceUrl,
                   style: const TextStyle(color: Colors.cyanAccent, fontSize: 11, decoration: TextDecoration.underline),
@@ -1010,6 +1030,11 @@ class _LibraryViewState extends State<LibraryView> {
         MarkdownBody(
           data: _selectedArticle!.content,
           selectable: true,
+          onTapLink: (text, href, title) {
+            if (href != null) {
+              _launchUrl(href);
+            }
+          },
           styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
             p: const TextStyle(color: Color(0xFFD2D7E5), fontSize: 14, height: 1.6),
             h1: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, height: 2),
@@ -1077,13 +1102,18 @@ class _LibraryViewState extends State<LibraryView> {
           child: TextField(
             controller: _editContentController,
             maxLines: null,
+            minLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
             keyboardType: TextInputType.multiline,
             style: const TextStyle(color: Color(0xFFD2D7E5), fontFamily: 'monospace', fontSize: 13, height: 1.5),
             decoration: InputDecoration(
               filled: true,
               fillColor: const Color(0xFF14161E),
-              contentPadding: const EdgeInsets.all(12),
+              contentPadding: const EdgeInsets.all(16),
+              alignLabelWithHint: true,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF2E3245))),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF00C9FF), width: 1.5)),
             ),
           ),
         ),

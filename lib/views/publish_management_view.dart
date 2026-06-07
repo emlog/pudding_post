@@ -63,7 +63,7 @@ class _PublishManagementViewState extends State<PublishManagementView> {
       _emlogApiKeyController.text,
     );
     _showSnackBar(
-      success ? 'Emlog 博客 API 连接测试成功！' : 'Emlog 连接失败，请检查站点 URL 或 API 密钥！',
+      success ? 'Emlog API 连接测试成功！' : 'Emlog 连接失败，请检查站点 URL 或 API 密钥！',
       !success,
     );
     setDialogState(() {}); 
@@ -80,6 +80,7 @@ class _PublishManagementViewState extends State<PublishManagementView> {
         emlogApiKey: _emlogApiKeyController.text,
         promptSingle: settings.promptSingle,
         promptList: settings.promptList,
+        networkProxyUrl: settings.networkProxyUrl,
       );
       Navigator.of(context).pop();
       _showSnackBar('Emlog 配置已成功保存！', false);
@@ -113,7 +114,7 @@ class _PublishManagementViewState extends State<PublishManagementView> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '配置 EMLOG 博客发布接口',
+                    '配置 EMLOG 发布接口',
                     style: TextStyle(
                       color: isDark ? Colors.white : Colors.black87, 
                       fontSize: 18, 
@@ -320,6 +321,7 @@ class _PublishManagementViewState extends State<PublishManagementView> {
                                   await launchUrl(url);
                                 }
                               },
+                              mouseCursor: SystemMouseCursors.click,
                               child: Text(
                                 'emlog官网',
                                 style: TextStyle(

@@ -258,4 +258,177 @@ class ExtractorService {
       },
     );
   }
+
+  /// 判断抓取到的文本内容是否是 RSS 或 Atom 结构化订阅源
+  /// 
+  /// 传入内容文本，通过前缀和特定 XML 标签关键字进行嗅探。
+  bool isRssContent(String content) {
+    final trimmed = content.trim();
+    return trimmed.startsWith('<?xml') || 
+           trimmed.contains('<rss') || 
+           trimmed.contains('<feed') || 
+           trimmed.contains('<channel') ||
+           trimmed.contains('<item') ||
+           trimmed.contains('<entry');
+  }
+
+  /// 解析 RSS 或 Atom 结构化订阅源中的文章项列表
+  /// 
+  /// 自动兼容并解析 RSS 的 <item> 和 Atom 的 <entry> 标签，并尝试提取标题、文章详情链接、正文内容、发布日期以及正文首图。
+  List<Map<String, String>> parseRss(String rssContent, String baseUrl) {
+    final List<Map<String, String>> articles = [];
+    try {
+      final document = parser.parse(rssContent);
+      
+      // 兼容 RSS 2.0 的 <item> 和 Atom Feed 的 <entry>
+      var items = document.querySelectorAll('item');
+      final isAtom = items.isEmpty;
+      if (isAtom) {
+        items = document.querySelectorAll('entry');
+      }
+
+      for (var item in items) {
+        // 1. 提取标题
+        final title = item.querySelector('title')?.text.trim() ?? '未命名文章';
+
+        // 2. 提取文章详情链接
+        var link = '';
+        if (isAtom) {
+          link = item.querySelector('link')?.attributes['href'] ?? '';
+        } else {
+          link = item.querySelector('link')?.text.trim() ?? '';
+        }
+        if (link.isEmpty) continue;
+        link = resolveUrl(baseUrl, link);
+
+        // 3. 提取正文内容
+        var content = '';
+        // 查找 content:encoded
+        final encodedElements = item.children.where((e) => e.localName == 'encoded');
+        if (encodedElements.isNotEmpty) {
+          content = encodedElements.first.text.trim();
+        }
+        if (content.isEmpty) {
+          content = item.querySelector('content')?.text.trim() ?? '';
+        }
+        if (content.isEmpty) {
+          content = item.querySelector('description')?.text.trim() ?? '';
+        }
+
+        // 4. 提取首图作为封面图
+        var coverUrl = '';
+        if (content.isNotEmpty) {
+          try {
+            final contentDoc = parser.parse(content);
+            final firstImg = contentDoc.querySelector('img');
+            if (firstImg != null) {
+              final src = firstImg.attributes['src'] ?? '';
+              if (src.isNotEmpty) {
+                coverUrl = resolveUrl(link, src);
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 5. 提取发布时间
+        final date = item.querySelector('pubDate')?.text.trim() ?? 
+                     item.querySelector('published')?.text.trim() ?? 
+                     item.querySelector('updated')?.text.trim() ?? '';
+
+        articles.add({
+          'title': title,
+          'link': link,
+          'content': content,
+          'cover_url': coverUrl,
+          'date': date,
+        });
+      }
+    } catch (_) {}
+    return articles;
+  }
+
+  /// 将 HTML 文本极简转换为简洁的 Markdown 排版格式
+  /// 
+  /// 遍历 DOM 树节点，将常用的 HTML 排版标签 (h1-h4, p, br, a, img, strong) 对应映射为 Markdown 语法。
+  String htmlToMarkdown(String html) {
+    try {
+      final document = parser.parse(html);
+      final body = document.body;
+      if (body == null) return html;
+
+      final buffer = StringBuffer();
+      
+      void convertNode(Node node) {
+        if (node.nodeType == Node.TEXT_NODE) {
+          final text = node.text?.trim() ?? '';
+          if (text.isNotEmpty) {
+            buffer.write(text);
+          }
+        } else if (node is Element) {
+          final localName = node.localName;
+          
+          if (localName == 'p') {
+            buffer.write('\n\n');
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+            buffer.write('\n\n');
+          } else if (localName == 'br') {
+            buffer.write('\n');
+          } else if (localName == 'h1' || localName == 'h2' || localName == 'h3' || localName == 'h4') {
+            final tag = localName!;
+            var headingLevel = 2;
+            if (tag.length > 1) {
+              headingLevel = int.tryParse(tag.substring(1)) ?? 2;
+            }
+            final prefix = '#' * headingLevel;
+            buffer.write('\n\n$prefix ');
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+            buffer.write('\n\n');
+          } else if (localName == 'strong' || localName == 'b') {
+            buffer.write(' **');
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+            buffer.write('** ');
+          } else if (localName == 'em' || localName == 'i') {
+            buffer.write(' *');
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+            buffer.write('* ');
+          } else if (localName == 'img') {
+            final src = node.attributes['src'] ?? '';
+            final alt = node.attributes['alt'] ?? '图片';
+            if (src.isNotEmpty) {
+              buffer.write('\n\n![$alt]($src)\n\n');
+            }
+          } else if (localName == 'a') {
+            final href = node.attributes['href'] ?? '';
+            buffer.write(' [');
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+            buffer.write(']($href) ');
+          } else {
+            for (var child in node.nodes) {
+              convertNode(child);
+            }
+          }
+        }
+      }
+
+      for (var node in body.nodes) {
+        convertNode(node);
+      }
+
+      return buffer.toString()
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+    } catch (_) {
+      return html;
+    }
+  }
 }

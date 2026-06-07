@@ -44,6 +44,7 @@ class _CustomButtonState extends State<CustomButton> {
                 : [const Color(0xFF00C9FF), const Color(0xFF92FE9D)]; // 极光绿与水绿渐变
 
     return MouseRegion(
+      cursor: buttonDisabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
       onEnter: (_) {
         if (!buttonDisabled) {
           setState(() {

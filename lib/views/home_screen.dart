@@ -1,6 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'collector_view.dart';
 import 'library_view.dart';
 import 'publish_management_view.dart';
@@ -80,7 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: TextStyle(color: Colors.grey, fontSize: 12),
                     ),
                     Text(
-                      'v1.0.0 Desktop',
+                      'v1.0.0',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -88,40 +87,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'GitHub 仓库地址',
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-                const SizedBox(height: 4),
-                InkWell(
-                  onTap: () async {
-                    final url = Uri.parse('https://github.com/emlog/pudding_post');
-                    if (await canLaunchUrl(url)) {
-                      await launchUrl(url);
-                    }
-                  },
-                  child: const Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'github.com/emlog/pudding_post',
-                          style: TextStyle(
-                            color: Color(0xFF00C9FF),
-                            fontSize: 12,
-                            decoration: TextDecoration.underline,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Icon(
-                        Icons.open_in_new,
-                        size: 12,
-                        color: Color(0xFF00C9FF),
-                      ),
-                    ],
-                  ),
                 ),
               ],
             ),

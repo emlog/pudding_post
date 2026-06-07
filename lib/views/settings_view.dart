@@ -6,7 +6,7 @@ import '../widgets/custom_button.dart';
 
 /// 配置设置页面 View
 /// 
-/// 管理并展示大语言模型 (LLM) API 配置、Emlog 博客配置以及 AI 规则 Prompt。提供配置保存及单向连接性测试。
+/// 管理并展示大语言模型 (LLM) API 配置、Emlog 配置以及 AI 规则 Prompt。提供配置保存及单向连接性测试。
 class SettingsView extends StatefulWidget {
   const SettingsView({super.key});
 
@@ -24,6 +24,7 @@ class _SettingsViewState extends State<SettingsView> {
   late TextEditingController _emlogApiKeyController;
   late TextEditingController _promptSingleController;
   late TextEditingController _promptListController;
+  late TextEditingController _networkProxyUrlController;
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _SettingsViewState extends State<SettingsView> {
     _emlogApiKeyController = TextEditingController(text: settings.emlogApiKey);
     _promptSingleController = TextEditingController(text: settings.promptSingle);
     _promptListController = TextEditingController(text: settings.promptList);
+    _networkProxyUrlController = TextEditingController(text: settings.networkProxyUrl);
   }
 
   @override
@@ -47,6 +49,7 @@ class _SettingsViewState extends State<SettingsView> {
     _emlogApiKeyController.dispose();
     _promptSingleController.dispose();
     _promptListController.dispose();
+    _networkProxyUrlController.dispose();
     super.dispose();
   }
 
@@ -98,7 +101,7 @@ class _SettingsViewState extends State<SettingsView> {
     );
 
     if (success) {
-      _showSnackBar('Emlog 博客 API 连接测试成功！', false);
+      _showSnackBar('Emlog API 连接测试成功！', false);
     } else {
       _showSnackBar('Emlog 连接失败，请检查站点 URL 或 API 密钥！', true);
     }
@@ -118,6 +121,7 @@ class _SettingsViewState extends State<SettingsView> {
         emlogApiKey: _emlogApiKeyController.text,
         promptSingle: _promptSingleController.text,
         promptList: _promptListController.text,
+        networkProxyUrl: _networkProxyUrlController.text,
       );
       _showSnackBar('全部配置已成功保存并同步！', false);
     }
@@ -229,7 +233,7 @@ class _SettingsViewState extends State<SettingsView> {
                         ),
                         const SizedBox(height: 24),
 
-                        // Emlog 博客配置卡片
+                        // Emlog 配置卡片
                         GlassContainer(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,7 +243,7 @@ class _SettingsViewState extends State<SettingsView> {
                                   Icon(Icons.rss_feed, color: Color(0xFF92FE9D), size: 20),
                                   SizedBox(width: 8),
                                   Text(
-                                    'Emlog 博客发布配置',
+                                    'Emlog 发布配置',
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
@@ -269,6 +273,36 @@ class _SettingsViewState extends State<SettingsView> {
                                 isSecondary: true,
                                 isLoading: settings.isTestingEmlog,
                                 onPressed: _testEmlog,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        // 网络代理配置卡片
+                        GlassContainer(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Row(
+                                children: [
+                                  Icon(Icons.vpn_lock, color: Color(0xFF00C9FF), size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '网络代理配置',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const Divider(color: Color(0xFF2E3245), height: 24),
+                              _buildTextField(
+                                label: 'HTTP/Socks 代理服务器',
+                                controller: _networkProxyUrlController,
+                                hint: '例如: 127.0.0.1:7890 (留空为直连)',
                               ),
                             ],
                           ),

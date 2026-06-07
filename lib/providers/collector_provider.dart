@@ -73,6 +73,11 @@ class CollectorProvider with ChangeNotifier {
   /// 抓取单个 URL 页面 HTML，调用大模型分析并写入本地数据库，最后刷新内容库列表。
   Future<bool> collectSingleArticle(String url, ArticleProvider articleProvider) async {
     _isCollecting = true;
+    
+    // 动态加载并应用网络代理设置，增强抓取兼容性
+    final proxyUrl = await _db.getSetting('network_proxy_url');
+    _extractor.setProxy(proxyUrl);
+
     _cancelRequested = false;
     _totalTaskCount = 1;
     _completedTaskCount = 0;
@@ -112,6 +117,11 @@ class CollectorProvider with ChangeNotifier {
     required int maxPages,
   }) async {
     _isCollecting = true;
+
+    // 动态加载并应用网络代理设置，增强抓取兼容性
+    final proxyUrl = await _db.getSetting('network_proxy_url');
+    _extractor.setProxy(proxyUrl);
+
     _cancelRequested = false;
     _totalTaskCount = 0;
     _completedTaskCount = 0;
@@ -135,6 +145,18 @@ class CollectorProvider with ChangeNotifier {
         
         try {
           final html = await _extractor.fetchHtml(currentUrl, useRandomDelay: true);
+          
+          // 自动判定并流转 RSS/Atom 订阅源列表解析
+          if (_extractor.isRssContent(html)) {
+            _addLog('INFO', '检测到列表 URL 为 RSS/Atom 订阅源，自动跳转至结构化解析分支...');
+            await _processSingleArticleUrl(currentUrl, useRandomDelay: false);
+            await articleProvider.loadArticles();
+            _isCollecting = false;
+            _currentProcessingUrl = '';
+            notifyListeners();
+            return;
+          }
+
           final cleanedHtml = _extractor.cleanHtmlForList(html);
           
           final result = await _llmService.extractList(cleanedHtml, promptList);
@@ -209,14 +231,139 @@ class CollectorProvider with ChangeNotifier {
     }
   }
 
+  /// 批量采集选定网址分组中的所有内容
+  /// 
+  /// 依次处理分组中的各个 URL 链接，若网址已被采集过则自动跳过。
+  Future<void> collectGroupUrls({
+    required List<String> urls,
+    required ArticleProvider articleProvider,
+  }) async {
+    _isCollecting = true;
+
+    // 动态加载并应用网络代理设置
+    final proxyUrl = await _db.getSetting('network_proxy_url');
+    _extractor.setProxy(proxyUrl);
+
+    _cancelRequested = false;
+    _totalTaskCount = urls.length;
+    _completedTaskCount = 0;
+    notifyListeners();
+
+    _addLog('INFO', '开始执行分组网址批量采集，共计 ${urls.length} 个目标');
+
+    try {
+      for (var i = 0; i < urls.length; i++) {
+        if (_cancelRequested) {
+          _addLog('WARNING', '分组采集任务已被用户中止！已完成: $_completedTaskCount / $_totalTaskCount');
+          break;
+        }
+
+        final targetUrl = urls[i].trim();
+        if (targetUrl.isEmpty) continue;
+        
+        _currentProcessingUrl = targetUrl;
+        _addLog('INFO', '正在处理第 (${i + 1}/${urls.length}): $targetUrl');
+
+        try {
+          final success = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
+          if (success) {
+            _completedTaskCount++;
+            _addLog('SUCCESS', '处理完毕: 第 (${i + 1}/${urls.length}) 篇');
+          } else {
+            _addLog('WARNING', '处理失败: 第 (${i + 1}/${urls.length}) 篇');
+          }
+        } catch (e) {
+          _addLog('ERROR', '采集链接 $targetUrl 出错: $e');
+        }
+
+        // 每次采集完毕刷新 UI 列表
+        await articleProvider.loadArticles();
+      }
+      
+      _addLog('SUCCESS', '分组批量采集任务结束！成功处理并入库 $_completedTaskCount / $_totalTaskCount 篇文章');
+    } catch (e) {
+      _addLog('ERROR', '分组批量任务发生严重异常: $e');
+    } finally {
+      _isCollecting = false;
+      _currentProcessingUrl = '';
+      notifyListeners();
+    }
+  }
+
   /// 封装单篇 URL 的核心处理逻辑（网页抓取 -> 清洗 -> 大模型提取 -> 存入数据库）
   /// 
   /// 供单篇和批量采集方法共同调用。
   Future<bool> _processSingleArticleUrl(String url, {bool useRandomDelay = false}) async {
+    // 智能去重拦截逻辑：若库中已存在相同 sourceUrl，则直接跳过
+    final isCollected = await _db.isUrlCollected(url);
+    if (isCollected) {
+      _addLog('INFO', '该网址已在内容库中存在，跳过采集: $url');
+      return true; // 返回 true 表示处理完成
+    }
+
     final promptSingle = await _db.getSetting('prompt_single');
 
     // 1. 抓取 HTML 源码
     final html = await _extractor.fetchHtml(url, useRandomDelay: useRandomDelay);
+
+    // 1.5 智能探测 RSS / Atom 结构化订阅源并处理
+    if (_extractor.isRssContent(html)) {
+      _addLog('INFO', '探测到目标网址为 RSS/Atom 结构化订阅源，开启高效提取流...');
+      final items = _extractor.parseRss(html, url);
+      _addLog('INFO', '成功从订阅源解析出 ${items.length} 篇文章');
+
+      var newImportedCount = 0;
+      for (var item in items) {
+        if (_cancelRequested) {
+          _addLog('WARNING', '采集流程已被用户中止！');
+          break;
+        }
+
+        final itemUrl = item['link'] ?? '';
+        final title = item['title'] ?? '未命名文章';
+        final rssContent = item['content'] ?? '';
+        final coverUrl = item['cover_url'] ?? '';
+
+        if (itemUrl.isEmpty) continue;
+
+        // 检查子项是否已采集
+        final subCollected = await _db.isUrlCollected(itemUrl);
+        if (subCollected) {
+          continue;
+        }
+
+        _addLog('INFO', '开始处理订阅项: $title');
+
+        // 如果正文丰富（全文本 Feed），直接进行本地 Markdown 转化并入库，100% 节省 LLM Token！
+        if (rssContent.length > 500) {
+          final markdownContent = _extractor.htmlToMarkdown(rssContent);
+          final newArticle = Article(
+            title: title,
+            content: markdownContent,
+            coverUrl: coverUrl,
+            sourceUrl: itemUrl,
+            createdAt: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
+          );
+          await _db.insertArticle(newArticle);
+          _addLog('SUCCESS', '内容充足！已直接解析 HTML 为 Markdown 存入内容库 (零 Token 消耗)');
+          newImportedCount++;
+        } else {
+          // 如果 RSS 只有摘要没有完整正文，则对该具体详情页 URL 发起二次详情采集
+          _addLog('INFO', 'RSS 正文不完整，自动发起网页详情提取...');
+          try {
+            final subSuccess = await _processSingleArticleUrl(itemUrl, useRandomDelay: true);
+            if (subSuccess) {
+              newImportedCount++;
+            }
+          } catch (e) {
+            _addLog('ERROR', '处理订阅子项 $itemUrl 出错: $e');
+          }
+        }
+      }
+
+      _addLog('SUCCESS', '订阅源 $url 处理完毕！共新增入库 $newImportedCount 篇文章');
+      return true;
+    }
 
     // 2. 清洗 HTML，只保留必要的内容结构
     final cleanedHtml = _extractor.cleanHtmlForSingleArticle(html);

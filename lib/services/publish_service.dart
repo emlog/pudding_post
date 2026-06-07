@@ -3,7 +3,7 @@ import 'database_service.dart';
 
 /// 文章发布服务类
 /// 
-/// 目前主要支持对接 emlog Pro 博客系统，通过配置的 API 地址及密钥将采集的文章推送到博客中，后续可扩展其他发布渠道。
+/// 目前主要支持对接 emlog 系统，通过配置的 API 地址及密钥将采集的文章推送到站点中，后续可扩展其他发布渠道。
 class PublishService {
   final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
@@ -41,7 +41,7 @@ class PublishService {
     }
   }
 
-  /// 获取 emlog 博客系统的文章分类列表
+  /// 获取 emlog 系统的文章分类列表
   /// 
   /// 用于发布文章时让用户选择对应的分类。返回分类 ID 与分类名称的 Map 列表。
   Future<List<Map<String, dynamic>>> fetchCategories() async {
@@ -50,7 +50,7 @@ class PublishService {
     final apiKey = config['apiKey']!;
 
     if (siteUrl.isEmpty || apiKey.isEmpty) {
-      throw Exception('请先配置 emlog 博客的站点网址和 API 密钥');
+      throw Exception('请先配置 emlog 的站点网址和 API 密钥');
     }
 
     try {
@@ -86,9 +86,9 @@ class PublishService {
     }
   }
 
-  /// 发布单篇文章至 emlog 博客系统
+  /// 发布单篇文章至 emlog 系统
   /// 
-  /// 传入文章标题、Markdown 内容、分类 ID 以及封面图 URL。发布成功后返回文章在博客系统中的绝对 URL 地址。
+  /// 传入文章标题、Markdown 内容、分类 ID 以及封面图 URL。发布成功后返回文章在系统中的绝对 URL 地址。
   Future<String> publishToEmlog({
     required String title,
     required String content,
@@ -100,7 +100,7 @@ class PublishService {
     final apiKey = config['apiKey']!;
 
     if (siteUrl.isEmpty || apiKey.isEmpty) {
-      throw Exception('请先配置 emlog 博客的站点网址和 API 密钥');
+      throw Exception('请先配置 emlog 的站点网址和 API 密钥');
     }
 
     final cleanUrl = siteUrl.endsWith('/') ? siteUrl.substring(0, siteUrl.length - 1) : siteUrl;
