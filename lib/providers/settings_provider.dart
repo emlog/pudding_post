@@ -132,6 +132,7 @@ class SettingsProvider with ChangeNotifier {
   String _promptSingle = '';
   String _promptList = '';
   String _networkProxyUrl = '';
+  int _maxConcurrency = 3;
 
   List<LlmModelConfig> _llmModels = [];
   List<UrlGroup> _urlGroups = [];
@@ -148,6 +149,7 @@ class SettingsProvider with ChangeNotifier {
   String get promptSingle => _promptSingle;
   String get promptList => _promptList;
   String get networkProxyUrl => _networkProxyUrl;
+  int get maxConcurrency => _maxConcurrency;
 
   List<LlmModelConfig> get llmModels => _llmModels;
   List<UrlGroup> get urlGroups => _urlGroups;
@@ -167,6 +169,10 @@ class SettingsProvider with ChangeNotifier {
     _promptSingle = await _db.getSetting('prompt_single', defaultValue: '');
     _promptList = await _db.getSetting('prompt_list', defaultValue: '');
     _networkProxyUrl = await _db.getSetting('network_proxy_url', defaultValue: '');
+    
+    // 加载最大并发数配置
+    final concurrencyStr = await _db.getSetting('max_concurrency', defaultValue: '3');
+    _maxConcurrency = int.tryParse(concurrencyStr) ?? 3;
 
     // 加载多模型列表配置
     final modelsJson = await _db.getSetting('llm_models_list', defaultValue: '');
@@ -292,6 +298,7 @@ class SettingsProvider with ChangeNotifier {
     required String promptSingle,
     required String promptList,
     required String networkProxyUrl,
+    required int maxConcurrency,
   }) async {
     _llmBaseUrl = llmBaseUrl.trim();
     _llmApiKey = llmApiKey.trim();
@@ -301,6 +308,7 @@ class SettingsProvider with ChangeNotifier {
     _promptSingle = promptSingle;
     _promptList = promptList;
     _networkProxyUrl = networkProxyUrl.trim();
+    _maxConcurrency = maxConcurrency;
 
     await _db.setSetting('llm_base_url', _llmBaseUrl);
     await _db.setSetting('llm_api_key', _llmApiKey);
@@ -310,6 +318,7 @@ class SettingsProvider with ChangeNotifier {
     await _db.setSetting('prompt_single', _promptSingle);
     await _db.setSetting('prompt_list', _promptList);
     await _db.setSetting('network_proxy_url', _networkProxyUrl);
+    await _db.setSetting('max_concurrency', _maxConcurrency.toString());
 
     notifyListeners();
   }

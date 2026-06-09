@@ -207,32 +207,40 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: Column(
                     children: [
-                      _buildSidebarItem(
+                      _SidebarItem(
                         index: 0,
                         icon: Icons.rocket_launch_outlined,
                         activeIcon: Icons.rocket_launch,
                         title: '内容采集',
+                        isSelected: _selectedIndex == 0,
+                        onTap: () => setState(() => _selectedIndex = 0),
                       ),
                       const SizedBox(height: 12),
-                      _buildSidebarItem(
+                      _SidebarItem(
                         index: 1,
                         icon: Icons.folder_open,
                         activeIcon: Icons.folder,
                         title: '内容管理',
+                        isSelected: _selectedIndex == 1,
+                        onTap: () => setState(() => _selectedIndex = 1),
                       ),
                       const SizedBox(height: 12),
-                      _buildSidebarItem(
+                      _SidebarItem(
                         index: 2,
                         icon: Icons.rss_feed_outlined,
                         activeIcon: Icons.rss_feed,
                         title: '发布管理',
+                        isSelected: _selectedIndex == 2,
+                        onTap: () => setState(() => _selectedIndex = 2),
                       ),
                       const SizedBox(height: 12),
-                      _buildSidebarItem(
+                      _SidebarItem(
                         index: 3,
                         icon: Icons.auto_awesome_outlined,
                         activeIcon: Icons.auto_awesome,
                         title: '模型设置',
+                        isSelected: _selectedIndex == 3,
+                        onTap: () => setState(() => _selectedIndex = 3),
                       ),
                     ],
                   ),
@@ -256,7 +264,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
+              colors: [Color(0xFF00C9FF), Color(0xFF8B5CF6)],
             ),
             borderRadius: BorderRadius.circular(10),
           ),
@@ -298,74 +306,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 创建标题颜色渐变着色器。
   static Shader _createGradientShader(Rect bounds) {
     return const LinearGradient(
-      colors: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
+      colors: [Color(0xFF00C9FF), Color(0xFF8B5CF6)],
     ).createShader(bounds);
-  }
-
-  /// 构建侧边栏单个导航项，自适应暗黑视觉规范。
-  Widget _buildSidebarItem({
-    required int index,
-    required IconData icon,
-    required IconData activeIcon,
-    required String title,
-  }) {
-    final isSelected = _selectedIndex == index;
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF2E3245).withOpacity(0.4)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected
-                  ? const Color(0xFF2E3245).withOpacity(0.8)
-                  : Colors.transparent,
-              width: 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isSelected ? activeIcon : icon,
-                color: isSelected ? const Color(0xFF00C9FF) : const Color(0xFFA0A5C0),
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                title,
-                style: TextStyle(
-                  color: isSelected ? Colors.white : const Color(0xFFA0A5C0),
-                  fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              if (isSelected) ...[
-                const Spacer(),
-                Container(
-                  width: 4,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00C9FF),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   /// 构建导航栏底部信息栏，仅包含展示关于信息的“i”图标按钮。
@@ -379,6 +321,129 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         onPressed: () => _showAboutDialog(context),
         tooltip: '关于系统',
+      ),
+    );
+  }
+}
+
+/// 构建侧边栏单个导航项，自适应暗黑视觉规范。
+/// 
+/// 该组件独立管理 Hover 悬停状态，并在悬停时提供平滑的背景发光及图标弹性微移（2 像素）交互。
+class _SidebarItem extends StatefulWidget {
+  final int index;
+  final IconData icon;
+  final IconData activeIcon;
+  final String title;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SidebarItem({
+    required this.index,
+    required this.icon,
+    required this.activeIcon,
+    required this.title,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_SidebarItem> createState() => _SidebarItemState();
+}
+
+class _SidebarItemState extends State<_SidebarItem> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    Color backgroundColor;
+    Color borderColor;
+
+    // 根据是否选中和是否悬停计算背景色和边框颜色
+    if (widget.isSelected) {
+      backgroundColor = const Color(0xFF2E3245).withOpacity(0.5);
+      borderColor = const Color(0xFF2E3245).withOpacity(0.9);
+    } else if (_isHovered) {
+      backgroundColor = const Color(0xFF2E3245).withOpacity(0.2);
+      borderColor = const Color(0xFF2E3245).withOpacity(0.4);
+    } else {
+      backgroundColor = Colors.transparent;
+      borderColor = Colors.transparent;
+    }
+
+    final Color textColor = widget.isSelected
+        ? Colors.white
+        : (_isHovered ? Colors.white.withOpacity(0.9) : const Color(0xFFA0A5C0));
+
+    final Color iconColor = widget.isSelected
+        ? const Color(0xFF00C9FF)
+        : (_isHovered ? const Color(0xFF00C9FF).withOpacity(0.8) : const Color(0xFFA0A5C0));
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: borderColor,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // 使用 AnimatedSlide 使得 Hover 时图标右移 2 像素，增加灵动交互体验
+              AnimatedSlide(
+                offset: _isHovered && !widget.isSelected
+                    ? const Offset(0.08, 0)
+                    : Offset.zero,
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  widget.isSelected ? widget.activeIcon : widget.icon,
+                  color: iconColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 文字也加上缓动颜色切换
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 150),
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+                child: Text(widget.title),
+              ),
+              if (widget.isSelected) ...[
+                const Spacer(),
+                // 激活状态下的发光右侧指示条
+                Container(
+                  width: 4,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00C9FF),
+                    borderRadius: BorderRadius.circular(2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF00C9FF).withOpacity(0.5),
+                        blurRadius: 4,
+                        offset: const Offset(0, 0),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

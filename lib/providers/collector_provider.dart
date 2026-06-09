@@ -5,6 +5,7 @@ import '../services/database_service.dart';
 import '../services/extractor_service.dart';
 import '../services/llm_service.dart';
 import 'article_provider.dart';
+import '../services/translation_service.dart';
 
 /// 采集任务日志结构
 class LogEntry {
@@ -18,6 +19,29 @@ class LogEntry {
   String toString() => '[$timestamp] [$type] $message';
 }
 
+/// 采集处理结果计数
+/// 
+/// 记录每次采集任务中成功入库、跳过和失败的文章数量，并支持通过加法运算符进行累加。
+class CollectResult {
+  final int successCount;
+  final int skippedCount;
+  final int failedCount;
+
+  CollectResult({
+    this.successCount = 0,
+    this.skippedCount = 0,
+    this.failedCount = 0,
+  });
+
+  CollectResult operator +(CollectResult other) {
+    return CollectResult(
+      successCount: successCount + other.successCount,
+      skippedCount: skippedCount + other.skippedCount,
+      failedCount: failedCount + other.failedCount,
+    );
+  }
+}
+
 /// 网页文章自动采集与批量解析流程控制器 Provider
 /// 
 /// 支持单篇采集、列表采集（包括分页深度配置），利用 LlmService 与 ExtractorService 完成网页的智能抓取、大模型解析并写入数据库，同时提供任务进度和控制日志输出。
@@ -25,6 +49,7 @@ class CollectorProvider with ChangeNotifier {
   final _db = DatabaseService.instance;
   final _extractor = ExtractorService();
   final _llmService = LlmService();
+  final _translationService = TranslationService();
 
   bool _isCollecting = false;
   List<LogEntry> _logs = [];
@@ -39,6 +64,7 @@ class CollectorProvider with ChangeNotifier {
   int get totalTaskCount => _totalTaskCount;
   int get completedTaskCount => _completedTaskCount;
   String get currentProcessingUrl => _currentProcessingUrl;
+  bool get cancelRequested => _cancelRequested;
   double get progress => _totalTaskCount == 0 ? 0.0 : _completedTaskCount / _totalTaskCount;
 
   /// 添加一条带时间戳和类型的采集日志
@@ -71,7 +97,8 @@ class CollectorProvider with ChangeNotifier {
   /// 执行单篇网页文章采集任务
   /// 
   /// 抓取单个 URL 页面 HTML，调用大模型分析并写入本地数据库，最后刷新内容库列表。
-  Future<bool> collectSingleArticle(String url, ArticleProvider articleProvider) async {
+  /// 返回 CollectResult 结果以便 UI 进行精准的消息提示。
+  Future<CollectResult> collectSingleArticle(String url, ArticleProvider articleProvider) async {
     _isCollecting = true;
     
     // 动态加载并应用网络代理设置，增强抓取兼容性
@@ -87,17 +114,23 @@ class CollectorProvider with ChangeNotifier {
     _addLog('INFO', '开始单篇采集任务，目标 URL: $url');
     
     try {
-      final success = await _processSingleArticleUrl(url, useRandomDelay: false);
-      if (success) {
-        _completedTaskCount = 1;
+      final result = await _processSingleArticleUrl(url, useRandomDelay: false);
+      if (result.successCount > 0) {
+        _completedTaskCount = result.successCount;
         _addLog('SUCCESS', '单篇采集完成并已存入数据库！');
         await articleProvider.loadArticles();
-        return true;
+        return result;
+      } else if (result.skippedCount > 0) {
+        _completedTaskCount = 0;
+        _addLog('WARNING', '该网址已在内容库中存在，跳过采集');
+        return result;
+      } else {
+        _addLog('WARNING', '单篇采集未能成功解析出正文内容');
+        return result;
       }
-      return false;
     } catch (e) {
       _addLog('ERROR', '采集失败: $e');
-      return false;
+      return CollectResult(failedCount: 1);
     } finally {
       _isCollecting = false;
       _currentProcessingUrl = '';
@@ -157,7 +190,7 @@ class CollectorProvider with ChangeNotifier {
             return;
           }
 
-          final cleanedHtml = _extractor.cleanHtmlForList(html);
+          final cleanedHtml = await _extractor.cleanHtmlForList(html);
           
           final result = await _llmService.extractList(cleanedHtml, promptList);
           final List<dynamic> urls = result['article_urls'] ?? [];
@@ -192,36 +225,49 @@ class CollectorProvider with ChangeNotifier {
       }
 
       _totalTaskCount = allArticleUrls.length;
-      _addLog('INFO', '总计提取出有效文章链接 $_totalTaskCount 个，开始逐篇进行抓取解析...');
+      _addLog('INFO', '总计提取出有效文章链接 $_totalTaskCount 个，开始并发进行抓取解析...');
 
-      // 逐篇抓取解析循环
-      for (var i = 0; i < allArticleUrls.length; i++) {
-        if (_cancelRequested) {
-          _addLog('WARNING', '采集已由用户中止！已完成: $_completedTaskCount / $_totalTaskCount');
-          break;
-        }
+      final concurrencyStr = await _db.getSetting('max_concurrency', defaultValue: '3');
+      final maxConcurrency = int.tryParse(concurrencyStr) ?? 3;
+      _addLog('INFO', '并发线程配置：最大并发 = $maxConcurrency');
 
-        final targetUrl = allArticleUrls[i];
-        _currentProcessingUrl = targetUrl;
-        _addLog('INFO', '正在采集第 (${i + 1}/$_totalTaskCount) 篇: $targetUrl');
+      var successCount = 0;
+      var skippedCount = 0;
+      var failedCount = 0;
 
-        try {
-          final success = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
-          if (success) {
+      // 并发抓取解析队列
+      await _runConcurrentTasks<String>(
+        inputs: allArticleUrls,
+        maxConcurrency: maxConcurrency,
+        task: (targetUrl, index) async {
+          _currentProcessingUrl = targetUrl;
+          _addLog('INFO', '[任务 #${index + 1}] 正在采集: $targetUrl');
+
+          try {
+            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
             _completedTaskCount++;
-            _addLog('SUCCESS', '采集成功: 第 (${i + 1}/$_totalTaskCount) 篇');
-          } else {
-            _addLog('WARNING', '采集跳过或失败: 第 (${i + 1}/$_totalTaskCount) 篇');
+            if (result.successCount > 0) {
+              successCount += result.successCount;
+              _addLog('SUCCESS', '[任务 #${index + 1}] 采集成功并入库');
+            } else if (result.skippedCount > 0) {
+              skippedCount += result.skippedCount;
+              _addLog('WARNING', '[任务 #${index + 1}] 采集跳过（已存在）');
+            } else {
+              failedCount += result.failedCount;
+              _addLog('WARNING', '[任务 #${index + 1}] 采集失败（无有效正文）');
+            }
+          } catch (e) {
+            _completedTaskCount++;
+            failedCount++;
+            _addLog('ERROR', '[任务 #${index + 1}] 采集出错: $e');
           }
-        } catch (e) {
-          _addLog('ERROR', '采集第 (${i + 1}/$_totalTaskCount) 篇出错: $e');
-        }
-        
-        // 采集完一篇后立即刷新内容库，给用户及时的状态回馈
-        await articleProvider.loadArticles();
-      }
+          
+          // 并发回刷 UI，通知进度
+          await articleProvider.loadArticles();
+        },
+      );
 
-      _addLog('SUCCESS', '批量采集任务结束！成功采集并入库 $_completedTaskCount / $_totalTaskCount 篇文章');
+      _addLog('SUCCESS', '批量采集任务结束！共处理 ${successCount + skippedCount + failedCount} 篇文章，成功入库 $successCount 篇，跳过（已存在）$skippedCount 篇，失败 $failedCount 篇');
     } catch (e) {
       _addLog('ERROR', '列表批量任务发生严重异常: $e');
     } finally {
@@ -249,38 +295,53 @@ class CollectorProvider with ChangeNotifier {
     _completedTaskCount = 0;
     notifyListeners();
 
-    _addLog('INFO', '开始执行分组网址批量采集，共计 ${urls.length} 个目标');
+    final concurrencyStr = await _db.getSetting('max_concurrency', defaultValue: '3');
+    final maxConcurrency = int.tryParse(concurrencyStr) ?? 3;
+    _addLog('INFO', '开始执行分组网址并发采集，共计 ${urls.length} 个目标，最大并发 = $maxConcurrency');
 
     try {
-      for (var i = 0; i < urls.length; i++) {
-        if (_cancelRequested) {
-          _addLog('WARNING', '分组采集任务已被用户中止！已完成: $_completedTaskCount / $_totalTaskCount');
-          break;
-        }
+      var successCount = 0;
+      var skippedCount = 0;
+      var failedCount = 0;
 
-        final targetUrl = urls[i].trim();
-        if (targetUrl.isEmpty) continue;
-        
-        _currentProcessingUrl = targetUrl;
-        _addLog('INFO', '正在处理第 (${i + 1}/${urls.length}): $targetUrl');
-
-        try {
-          final success = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
-          if (success) {
+      await _runConcurrentTasks<String>(
+        inputs: urls,
+        maxConcurrency: maxConcurrency,
+        task: (rawUrl, index) async {
+          final targetUrl = rawUrl.trim();
+          if (targetUrl.isEmpty) {
             _completedTaskCount++;
-            _addLog('SUCCESS', '处理完毕: 第 (${i + 1}/${urls.length}) 篇');
-          } else {
-            _addLog('WARNING', '处理失败: 第 (${i + 1}/${urls.length}) 篇');
+            return;
           }
-        } catch (e) {
-          _addLog('ERROR', '采集链接 $targetUrl 出错: $e');
-        }
+          
+          _currentProcessingUrl = targetUrl;
+          _addLog('INFO', '[任务 #${index + 1}] 正在处理: $targetUrl');
 
-        // 每次采集完毕刷新 UI 列表
-        await articleProvider.loadArticles();
-      }
+          try {
+            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
+            _completedTaskCount++;
+            if (result.successCount > 0) {
+              successCount += result.successCount;
+              _addLog('SUCCESS', '[任务 #${index + 1}] 处理完毕，成功入库');
+            } else if (result.skippedCount > 0) {
+              skippedCount += result.skippedCount;
+              _addLog('WARNING', '[任务 #${index + 1}] 因已存在跳过');
+            } else {
+              failedCount += result.failedCount;
+              _addLog('WARNING', '[任务 #${index + 1}] 采集提取失败');
+            }
+          } catch (e) {
+            _completedTaskCount++;
+            failedCount++;
+            _addLog('ERROR', '[任务 #${index + 1}] 采集出错: $e');
+          }
+
+          // 每次采集完毕刷新 UI 列表
+          await articleProvider.loadArticles();
+        },
+      );
       
-      _addLog('SUCCESS', '分组批量采集任务结束！成功处理并入库 $_completedTaskCount / $_totalTaskCount 篇文章');
+      _addLog('SUCCESS', '分组批量采集任务结束！共处理 ${successCount + skippedCount + failedCount} 篇文章，成功入库 $successCount 篇，跳过（已存在）$skippedCount 篇，失败 $failedCount 篇');
     } catch (e) {
       _addLog('ERROR', '分组批量任务发生严重异常: $e');
     } finally {
@@ -293,12 +354,12 @@ class CollectorProvider with ChangeNotifier {
   /// 封装单篇 URL 的核心处理逻辑（网页抓取 -> 清洗 -> 大模型提取 -> 存入数据库）
   /// 
   /// 供单篇和批量采集方法共同调用。
-  Future<bool> _processSingleArticleUrl(String url, {bool useRandomDelay = false}) async {
+  Future<CollectResult> _processSingleArticleUrl(String url, {bool useRandomDelay = false}) async {
     // 智能去重拦截逻辑：若库中已存在相同 sourceUrl，则直接跳过
     final isCollected = await _db.isUrlCollected(url);
     if (isCollected) {
       _addLog('INFO', '该网址已在内容库中存在，跳过采集: $url');
-      return true; // 返回 true 表示处理完成
+      return CollectResult(skippedCount: 1);
     }
 
     final promptSingle = await _db.getSetting('prompt_single');
@@ -313,6 +374,8 @@ class CollectorProvider with ChangeNotifier {
       _addLog('INFO', '成功从订阅源解析出 ${items.length} 篇文章');
 
       var newImportedCount = 0;
+      var skippedCount = 0;
+      var failedCount = 0;
       for (var item in items) {
         if (_cancelRequested) {
           _addLog('WARNING', '采集流程已被用户中止！');
@@ -329,6 +392,7 @@ class CollectorProvider with ChangeNotifier {
         // 检查子项是否已采集
         final subCollected = await _db.isUrlCollected(itemUrl);
         if (subCollected) {
+          skippedCount++;
           continue;
         }
 
@@ -336,10 +400,11 @@ class CollectorProvider with ChangeNotifier {
 
         // 如果正文丰富（全文本 Feed），直接进行本地 Markdown 转化并入库，100% 节省 LLM Token！
         if (rssContent.length > 500) {
-          final markdownContent = _extractor.htmlToMarkdown(rssContent);
+          final markdownContent = await _extractor.htmlToMarkdown(rssContent);
+          final translated = await _translateArticleIfNeeded(title, markdownContent);
           final newArticle = Article(
-            title: title,
-            content: markdownContent,
+            title: translated['title']!,
+            content: translated['content']!,
             coverUrl: coverUrl,
             sourceUrl: itemUrl,
             createdAt: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
@@ -351,22 +416,88 @@ class CollectorProvider with ChangeNotifier {
           // 如果 RSS 只有摘要没有完整正文，则对该具体详情页 URL 发起二次详情采集
           _addLog('INFO', 'RSS 正文不完整，自动发起网页详情提取...');
           try {
-            final subSuccess = await _processSingleArticleUrl(itemUrl, useRandomDelay: true);
-            if (subSuccess) {
-              newImportedCount++;
-            }
+            final subResult = await _processSingleArticleUrl(itemUrl, useRandomDelay: true);
+            newImportedCount += subResult.successCount;
+            skippedCount += subResult.skippedCount;
+            failedCount += subResult.failedCount;
           } catch (e) {
             _addLog('ERROR', '处理订阅子项 $itemUrl 出错: $e');
+            failedCount++;
           }
         }
       }
 
-      _addLog('SUCCESS', '订阅源 $url 处理完毕！共新增入库 $newImportedCount 篇文章');
-      return true;
+      _addLog('SUCCESS', '订阅源 $url 处理完毕！共新增入库 $newImportedCount 篇文章，跳过 $skippedCount 篇，失败 $failedCount 篇');
+      return CollectResult(
+        successCount: newImportedCount,
+        skippedCount: skippedCount,
+        failedCount: failedCount,
+      );
+    }
+
+    // 1.6 智能探测普通 HTML 文章列表页并依次采集
+    if (_extractor.isListContent(html)) {
+      _addLog('INFO', '探测到目标网址为普通 HTML 文章列表页，开启智能列表提取流...');
+      
+      final promptList = await _db.getSetting('prompt_list');
+      final cleanedListHtml = await _extractor.cleanHtmlForList(html);
+      
+      try {
+        final extractResult = await _llmService.extractList(cleanedListHtml, promptList);
+        final List<dynamic> urls = extractResult['article_urls'] ?? [];
+        _addLog('INFO', '成功从列表页中提取出 ${urls.length} 篇文章链接');
+
+        var newImportedCount = 0;
+        var skippedCount = 0;
+        var failedCount = 0;
+
+        for (var itemRawUrl in urls) {
+          if (_cancelRequested) {
+            _addLog('WARNING', '采集流程已被用户中止！');
+            break;
+          }
+
+          final itemUrl = _extractor.resolveUrl(url, itemRawUrl.toString());
+          if (itemUrl.isEmpty) continue;
+
+          // 检查子项是否已采集，实现主要不要重复入库
+          final subCollected = await _db.isUrlCollected(itemUrl);
+          if (subCollected) {
+            skippedCount++;
+            continue;
+          }
+
+          _addLog('INFO', '开始处理列表子项网址: $itemUrl');
+          try {
+            final subResult = await _processSingleArticleUrl(itemUrl, useRandomDelay: true);
+            newImportedCount += subResult.successCount;
+            skippedCount += subResult.skippedCount;
+            failedCount += subResult.failedCount;
+          } catch (e) {
+            _addLog('ERROR', '处理列表子项 $itemUrl 出错: $e');
+            failedCount++;
+          }
+        }
+
+        _addLog('SUCCESS', '列表页 $url 处理完毕！共新增入库 $newImportedCount 篇文章，跳过 $skippedCount 篇，失败 $failedCount 篇');
+        return CollectResult(
+          successCount: newImportedCount,
+          skippedCount: skippedCount,
+          failedCount: failedCount,
+        );
+      } catch (e) {
+        _addLog('ERROR', '大模型解析列表项失败: $e');
+        return CollectResult(failedCount: 1);
+      }
+    }
+
+    if (_cancelRequested) {
+      _addLog('WARNING', '采集流程已被用户中止，跳过大模型提取。');
+      return CollectResult();
     }
 
     // 2. 清洗 HTML，只保留必要的内容结构
-    final cleanedHtml = _extractor.cleanHtmlForSingleArticle(html);
+    final cleanedHtml = await _extractor.cleanHtmlForSingleArticle(html);
 
     // 3. 调用 LLM 提炼 JSON
     final result = await _llmService.extractArticle(cleanedHtml, promptSingle);
@@ -381,19 +512,80 @@ class CollectorProvider with ChangeNotifier {
 
     if (content.trim().isEmpty) {
       _addLog('WARNING', '大模型未提取出有效正文内容，放弃入库：$url');
-      return false;
+      return CollectResult(failedCount: 1);
     }
+
+    final translated = await _translateArticleIfNeeded(title, content);
 
     // 4. 存入本地数据库
     final newArticle = Article(
-      title: title,
-      content: content,
+      title: translated['title']!,
+      content: translated['content']!,
       coverUrl: coverUrl,
       sourceUrl: url,
       createdAt: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
     );
 
     await _db.insertArticle(newArticle);
-    return true;
+    return CollectResult(successCount: 1);
+  }
+
+  /// 如果内容为英文，自动调用 Google 免费翻译接口将其翻译为简体中文
+  Future<Map<String, String>> _translateArticleIfNeeded(String title, String content) async {
+    if (_translationService.isEnglish(content)) {
+      _addLog('INFO', '检测到网页内容为英文，正在调用 Google 免费翻译接口将其翻译为简体中文...');
+      try {
+        final translatedTitle = await _translationService.translateToChinese(title);
+        final translatedContent = await _translationService.translateToChinese(content);
+        _addLog('SUCCESS', '英文内容成功翻译为简体中文并已入库。');
+        return {
+          'title': translatedTitle,
+          'content': translatedContent,
+        };
+      } catch (e) {
+        _addLog('ERROR', '自动翻译失败: $e，保留英文原文入库');
+      }
+    }
+    return {
+      'title': title,
+      'content': content,
+    };
+  }
+
+  /// 并发执行任务的辅助方法，限制最大并发数
+  /// 
+  /// 利用事件竞争队列模型，动态消化任务列表，防卡顿与连接池阻塞。
+  Future<void> _runConcurrentTasks<I>({
+    required List<I> inputs,
+    required int maxConcurrency,
+    required Future<void> Function(I input, int index) task,
+  }) async {
+    var nextIndex = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        int currentIndex;
+        if (nextIndex >= inputs.length || _cancelRequested) {
+          return;
+        }
+        currentIndex = nextIndex;
+        nextIndex++;
+
+        final input = inputs[currentIndex];
+        try {
+          await task(input, currentIndex);
+        } catch (_) {
+          // 容错捕获单个异常，保证并发池中其他 Worker 正常流转
+        }
+      }
+    }
+
+    final List<Future<void>> workers = [];
+    final actualConcurrency = maxConcurrency.clamp(1, inputs.length);
+    for (var i = 0; i < actualConcurrency; i++) {
+      workers.add(worker());
+    }
+
+    await Future.wait(workers);
   }
 }

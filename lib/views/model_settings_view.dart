@@ -218,6 +218,7 @@ class _ModelSettingsViewState extends State<ModelSettingsView> {
                         await provider.addLlmModel(newModel);
                         _showSnackBar('新模型配置已成功添加', false);
                       }
+                      if (!context.mounted) return;
                       Navigator.of(context).pop();
                     }
                   },
@@ -254,6 +255,7 @@ class _ModelSettingsViewState extends State<ModelSettingsView> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       final provider = Provider.of<SettingsProvider>(context, listen: false);
       await provider.deleteLlmModel(modelConfig.id);
       _showSnackBar('模型配置已物理删除', false);

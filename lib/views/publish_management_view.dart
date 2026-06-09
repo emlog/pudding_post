@@ -81,7 +81,9 @@ class _PublishManagementViewState extends State<PublishManagementView> {
         promptSingle: settings.promptSingle,
         promptList: settings.promptList,
         networkProxyUrl: settings.networkProxyUrl,
+        maxConcurrency: settings.maxConcurrency,
       );
+      if (!mounted) return;
       Navigator.of(context).pop();
       _showSnackBar('Emlog 配置已成功保存！', false);
     }
@@ -295,12 +297,27 @@ class _PublishManagementViewState extends State<PublishManagementView> {
                           const SizedBox(width: 8),
                           // 状态标识
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: hasConfig
-                                  ? const Color(0xFF103020)
-                                  : const Color(0xFF331515),
-                              borderRadius: BorderRadius.circular(4),
+                                  ? const Color(0xFF92FE9D).withOpacity(0.12)
+                                  : const Color(0xFFFA6262).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: hasConfig
+                                    ? const Color(0xFF92FE9D).withOpacity(0.3)
+                                    : const Color(0xFFFA6262).withOpacity(0.3),
+                                width: 1,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: (hasConfig
+                                          ? const Color(0xFF92FE9D)
+                                          : const Color(0xFFFA6262))
+                                      .withOpacity(0.12),
+                                  blurRadius: 8,
+                                ),
+                              ],
                             ),
                             child: Text(
                               hasConfig ? '已配置' : '未配置',
@@ -309,6 +326,8 @@ class _PublishManagementViewState extends State<PublishManagementView> {
                                     ? const Color(0xFF92FE9D)
                                     : const Color(0xFFFFA0A0),
                                 fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.3,
                               ),
                             ),
                           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/collector_provider.dart';
 import '../providers/article_provider.dart';
@@ -46,6 +47,7 @@ class _CollectorViewState extends State<CollectorView> {
   }
 
   /// 执行采集任务
+  /// 开始采集任务
   /// 
   /// 根据当前模式调用单篇采集、列表批量采集或分组去重批量采集。
   Future<void> _startCollection() async {
@@ -102,9 +104,13 @@ class _CollectorViewState extends State<CollectorView> {
         _showSnackBar('请输入以 http:// 或 https:// 开头的合法网址！', true);
         return;
       }
-      final success = await collector.collectSingleArticle(url, articleProvider);
-      if (success) {
+      final result = await collector.collectSingleArticle(url, articleProvider);
+      if (result.successCount > 0) {
         _showSnackBar('单篇文章采集入库成功！可前往内容库查看', false);
+      } else if (result.skippedCount > 0) {
+        _showSnackBar('该网址已在内容库中存在，跳过采集', true);
+      } else {
+        _showSnackBar('单篇采集失败，请查看日志获取详细错误信息', true);
       }
     }
   }
@@ -602,30 +608,56 @@ class _CollectorViewState extends State<CollectorView> {
                 ? groups.firstWhere((g) => g.id == activeGroupId)
                 : null;
 
+            const double elementHeight = 38.0;
+
             return Dialog(
-              backgroundColor: const Color(0xFF1E212A),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              backgroundColor: const Color(0xFF161922),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: Color(0xFF2E3245), width: 1),
+              ),
               child: Container(
-                width: 700,
-                height: 500,
-                padding: const EdgeInsets.all(20),
+                width: 720,
+                height: 520,
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          '网址采集分组管理',
-                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 18,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00C9FF),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            const Text(
+                              '网址采集分组管理',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close, color: Colors.grey),
+                          icon: const Icon(Icons.close_rounded, color: Color(0xFFA0A5C0), size: 20),
+                          splashRadius: 20,
                           onPressed: () => Navigator.of(context).pop(),
                         )
                       ],
                     ),
-                    const Divider(color: Color(0xFF2E3245), height: 20),
+                    const SizedBox(height: 12),
+                    const Divider(color: Color(0xFF25293A), height: 1),
+                    const SizedBox(height: 20),
                     Expanded(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -635,85 +667,190 @@ class _CollectorViewState extends State<CollectorView> {
                             flex: 2,
                             child: Container(
                               decoration: const BoxDecoration(
-                                border: Border(right: BorderSide(color: Color(0xFF2E3245))),
+                                border: Border(right: BorderSide(color: Color(0xFF25293A), width: 1)),
                               ),
-                              padding: const EdgeInsets.only(right: 12),
+                              padding: const EdgeInsets.only(right: 16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('网址分组', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                  const SizedBox(height: 8),
+                                  const Text(
+                                    '网址分组',
+                                    style: TextStyle(
+                                      color: Color(0xFFA0A5C0),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
                                   Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
                                       Expanded(
-                                        child: TextField(
-                                          controller: newGroupController,
-                                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                                          decoration: InputDecoration(
-                                            hintText: '输入新分组名称...',
-                                            hintStyle: const TextStyle(color: Colors.grey, fontSize: 11),
-                                            filled: true,
-                                            fillColor: const Color(0xFF14161E),
-                                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                        child: Focus(
+                                          onFocusChange: (hasFocus) => setDialogState(() {}),
+                                          child: Builder(
+                                            builder: (context) {
+                                              final hasFocus = Focus.of(context).hasFocus;
+                                              return AnimatedContainer(
+                                                duration: const Duration(milliseconds: 150),
+                                                height: elementHeight,
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF0F111A),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  border: Border.all(
+                                                    color: hasFocus ? const Color(0xFF00C9FF) : const Color(0xFF2E3245),
+                                                    width: hasFocus ? 1.5 : 1.0,
+                                                  ),
+                                                  boxShadow: hasFocus
+                                                      ? [
+                                                          BoxShadow(
+                                                            color: const Color(0xFF00C9FF).withOpacity(0.15),
+                                                            blurRadius: 6,
+                                                            spreadRadius: 0,
+                                                          )
+                                                        ]
+                                                      : [],
+                                                ),
+                                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                                alignment: Alignment.centerLeft,
+                                                child: TextField(
+                                                  controller: newGroupController,
+                                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                                  decoration: const InputDecoration(
+                                                    isCollapsed: true,
+                                                    hintText: '输入新分组名称...',
+                                                    hintStyle: TextStyle(color: Color(0xFF4A4E69), fontSize: 12),
+                                                    border: InputBorder.none,
+                                                  ),
+                                                  onSubmitted: (_) async {
+                                                    final name = newGroupController.text.trim();
+                                                    if (name.isNotEmpty) {
+                                                      final newGroup = UrlGroup(
+                                                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                                                        name: name,
+                                                        urls: [],
+                                                        createdAt: DateTime.now().toIso8601String(),
+                                                      );
+                                                      await settings.addUrlGroup(newGroup);
+                                                      newGroupController.clear();
+                                                      setDialogState(() {
+                                                        activeGroupId = newGroup.id;
+                                                      });
+                                                    }
+                                                  },
+                                                ),
+                                              );
+                                            },
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      IconButton(
-                                        icon: const Icon(Icons.add_circle, color: Color(0xFF00C9FF)),
-                                        onPressed: () async {
-                                          final name = newGroupController.text.trim();
-                                          if (name.isNotEmpty) {
-                                            final newGroup = UrlGroup(
-                                              id: DateTime.now().millisecondsSinceEpoch.toString(),
-                                              name: name,
-                                              urls: [],
-                                              createdAt: DateTime.now().toIso8601String(),
-                                            );
-                                            await settings.addUrlGroup(newGroup);
-                                            newGroupController.clear();
-                                            setDialogState(() {
-                                              activeGroupId = newGroup.id;
-                                            });
-                                          }
-                                        },
-                                      )
+                                      Material(
+                                        color: Colors.transparent,
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final name = newGroupController.text.trim();
+                                            if (name.isNotEmpty) {
+                                              final newGroup = UrlGroup(
+                                                id: DateTime.now().millisecondsSinceEpoch.toString(),
+                                                name: name,
+                                                urls: [],
+                                                createdAt: DateTime.now().toIso8601String(),
+                                              );
+                                              await settings.addUrlGroup(newGroup);
+                                              newGroupController.clear();
+                                              setDialogState(() {
+                                                activeGroupId = newGroup.id;
+                                              });
+                                            }
+                                          },
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Container(
+                                            width: elementHeight,
+                                            height: elementHeight,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF0F111A),
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: const Color(0xFF00C9FF), width: 1.2),
+                                            ),
+                                            child: const Icon(Icons.add_rounded, color: Color(0xFF00C9FF), size: 20),
+                                          ),
+                                        ),
+                                      ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 16),
                                   Expanded(
                                     child: groups.isEmpty
-                                        ? const Center(child: Text('暂无分组', style: TextStyle(color: Colors.grey, fontSize: 12)))
+                                        ? const Center(
+                                            child: Text(
+                                              '暂无分组',
+                                              style: TextStyle(color: Color(0xFF4A4E69), fontSize: 12),
+                                            ),
+                                          )
                                         : ListView.builder(
                                             itemCount: groups.length,
                                             itemBuilder: (context, index) {
                                               final g = groups[index];
                                               final isSelected = g.id == activeGroupId;
-                                              return ListTile(
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                tileColor: isSelected ? const Color(0xFF2E3245) : Colors.transparent,
-                                                title: Text(
-                                                  g.name,
-                                                  style: TextStyle(
-                                                    color: isSelected ? Colors.white : const Color(0xFFA0A5C0),
-                                                    fontSize: 13,
-                                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                              return Padding(
+                                                padding: const EdgeInsets.only(bottom: 6),
+                                                child: Material(
+                                                  color: Colors.transparent,
+                                                  child: InkWell(
+                                                    onTap: () {
+                                                      setDialogState(() {
+                                                        activeGroupId = g.id;
+                                                      });
+                                                    },
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: AnimatedContainer(
+                                                      duration: const Duration(milliseconds: 150),
+                                                      height: 38,
+                                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                                      decoration: BoxDecoration(
+                                                        color: isSelected ? const Color(0xFF25293A) : Colors.transparent,
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(
+                                                          color: isSelected ? const Color(0xFF00C9FF).withOpacity(0.3) : Colors.transparent,
+                                                          width: 1.0,
+                                                        ),
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          Icon(
+                                                            Icons.folder_open_rounded,
+                                                            size: 16,
+                                                            color: isSelected ? const Color(0xFF00C9FF) : const Color(0xFFA0A5C0),
+                                                          ),
+                                                          const SizedBox(width: 8),
+                                                          Expanded(
+                                                            child: Text(
+                                                              g.name,
+                                                              style: TextStyle(
+                                                                color: isSelected ? Colors.white : const Color(0xFFA0A5C0),
+                                                                fontSize: 13,
+                                                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                                                              ),
+                                                              overflow: TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                          IconButton(
+                                                            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                                                            color: const Color(0xFFFF5252).withOpacity(0.8),
+                                                            padding: EdgeInsets.zero,
+                                                            constraints: const BoxConstraints(),
+                                                            splashRadius: 16,
+                                                            onPressed: () async {
+                                                              await settings.deleteUrlGroup(g.id);
+                                                              setDialogState(() {});
+                                                            },
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
                                                   ),
                                                 ),
-                                                trailing: IconButton(
-                                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
-                                                  onPressed: () async {
-                                                    await settings.deleteUrlGroup(g.id);
-                                                    setDialogState(() {});
-                                                  },
-                                                ),
-                                                onTap: () {
-                                                  setDialogState(() {
-                                                    activeGroupId = g.id;
-                                                  });
-                                                },
                                               );
                                             },
                                           ),
@@ -726,61 +863,142 @@ class _CollectorViewState extends State<CollectorView> {
                           Expanded(
                             flex: 3,
                             child: Padding(
-                              padding: const EdgeInsets.only(left: 12),
+                              padding: const EdgeInsets.only(left: 16),
                               child: activeGroup == null
                                   ? const Center(
-                                      child: Text('请先创建并选择一个分组', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                                      child: Text(
+                                        '请先创建并选择一个分组',
+                                        style: TextStyle(color: Color(0xFF4A4E69), fontSize: 13),
+                                      ),
                                     )
                                   : Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(
-                                          '管理分组: ${activeGroup.name}',
-                                          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                                        ),
-                                        const SizedBox(height: 12),
                                         Row(
                                           children: [
+                                            const Icon(Icons.edit_note_rounded, color: Color(0xFFA0A5C0), size: 16),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '管理分组: ${activeGroup.name}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
                                             Expanded(
-                                              child: TextField(
-                                                controller: newUrlController,
-                                                style: const TextStyle(color: Colors.white, fontSize: 12),
-                                                decoration: InputDecoration(
-                                                  hintText: '输入添加的目标网址 URL...',
-                                                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 11),
-                                                  filled: true,
-                                                  fillColor: const Color(0xFF14161E),
-                                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+                                              child: Focus(
+                                                onFocusChange: (hasFocus) => setDialogState(() {}),
+                                                child: Builder(
+                                                  builder: (context) {
+                                                    final hasFocus = Focus.of(context).hasFocus;
+                                                    return AnimatedContainer(
+                                                      duration: const Duration(milliseconds: 150),
+                                                      height: elementHeight,
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFF0F111A),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(
+                                                          color: hasFocus ? const Color(0xFF00C9FF) : const Color(0xFF2E3245),
+                                                          width: hasFocus ? 1.5 : 1.0,
+                                                        ),
+                                                        boxShadow: hasFocus
+                                                            ? [
+                                                                BoxShadow(
+                                                                  color: const Color(0xFF00C9FF).withOpacity(0.15),
+                                                                  blurRadius: 6,
+                                                                  spreadRadius: 0,
+                                                                )
+                                                              ]
+                                                            : [],
+                                                      ),
+                                                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                                                      alignment: Alignment.centerLeft,
+                                                      child: TextField(
+                                                        controller: newUrlController,
+                                                        style: const TextStyle(color: Colors.white, fontSize: 13),
+                                                        decoration: const InputDecoration(
+                                                          isCollapsed: true,
+                                                          hintText: '输入添加的目标网址 URL...',
+                                                          hintStyle: TextStyle(color: Color(0xFF4A4E69), fontSize: 12),
+                                                          border: InputBorder.none,
+                                                        ),
+                                                        onSubmitted: (_) async {
+                                                          final url = newUrlController.text.trim();
+                                                          if (url.isNotEmpty && (url.startsWith('http://') || url.startsWith('https://'))) {
+                                                            await settings.addUrlToGroup(activeGroupId!, url);
+                                                            newUrlController.clear();
+                                                            setDialogState(() {});
+                                                          }
+                                                        },
+                                                      ),
+                                                    );
+                                                  },
                                                 ),
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFF00C9FF),
-                                                foregroundColor: Colors.black,
-                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                            Material(
+                                              color: Colors.transparent,
+                                              child: InkWell(
+                                                onTap: () async {
+                                                  final url = newUrlController.text.trim();
+                                                  if (url.isNotEmpty && (url.startsWith('http://') || url.startsWith('https://'))) {
+                                                    await settings.addUrlToGroup(activeGroupId!, url);
+                                                    newUrlController.clear();
+                                                    setDialogState(() {});
+                                                  }
+                                                },
+                                                borderRadius: BorderRadius.circular(8),
+                                                child: Ink(
+                                                  decoration: BoxDecoration(
+                                                    gradient: const LinearGradient(
+                                                      colors: [Color(0xFF00C9FF), Color(0xFF00B0FF)],
+                                                      begin: Alignment.topLeft,
+                                                      end: Alignment.bottomRight,
+                                                    ),
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: const Color(0xFF00C9FF).withOpacity(0.2),
+                                                        blurRadius: 6,
+                                                        offset: const Offset(0, 2),
+                                                      )
+                                                    ],
+                                                  ),
+                                                  child: Container(
+                                                    height: elementHeight,
+                                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                                    alignment: Alignment.center,
+                                                    child: const Text(
+                                                      '添加',
+                                                      style: TextStyle(
+                                                        color: Color(0xFF0F111A),
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.5,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
-                                              child: const Text('添加', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                              onPressed: () async {
-                                                final url = newUrlController.text.trim();
-                                                if (url.isNotEmpty && (url.startsWith('http://') || url.startsWith('https://'))) {
-                                                  await settings.addUrlToGroup(activeGroupId!, url);
-                                                  newUrlController.clear();
-                                                  setDialogState(() {});
-                                                }
-                                              },
-                                            )
+                                            ),
                                           ],
                                         ),
-                                        const SizedBox(height: 12),
+                                        const SizedBox(height: 16),
                                         Expanded(
                                           child: activeGroup.urls.isEmpty
                                               ? const Center(
-                                                  child: Text('该分组下暂无网址，请在上方添加',
-                                                      style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                                  child: Text(
+                                                    '该分组下暂无网址，请在上方添加',
+                                                    style: TextStyle(color: Color(0xFF4A4E69), fontSize: 12),
+                                                  ),
                                                 )
                                               : ListView.builder(
                                                   itemCount: activeGroup.urls.length,
@@ -788,25 +1006,58 @@ class _CollectorViewState extends State<CollectorView> {
                                                     final u = activeGroup.urls[index];
                                                     return Container(
                                                       margin: const EdgeInsets.only(bottom: 6),
-                                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                      height: 38,
+                                                      padding: const EdgeInsets.symmetric(horizontal: 10),
                                                       decoration: BoxDecoration(
-                                                        color: const Color(0xFF14161E),
-                                                        borderRadius: BorderRadius.circular(6),
-                                                        border: Border.all(color: const Color(0xFF2E3245)),
+                                                        color: const Color(0xFF0F111A),
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        border: Border.all(color: const Color(0xFF25293A)),
                                                       ),
                                                       child: Row(
                                                         children: [
+                                                          const Icon(
+                                                            Icons.link_rounded,
+                                                            size: 14,
+                                                            color: Color(0xFF00C9FF),
+                                                          ),
+                                                          const SizedBox(width: 8),
                                                           Expanded(
                                                             child: Text(
                                                               u,
-                                                              style: const TextStyle(color: Color(0xFFD0D5E0), fontSize: 11),
+                                                              style: const TextStyle(
+                                                                color: Color(0xFFCFD4E6),
+                                                                fontSize: 12,
+                                                              ),
                                                               overflow: TextOverflow.ellipsis,
                                                             ),
                                                           ),
+                                                          const SizedBox(width: 8),
                                                           IconButton(
-                                                            icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 16),
+                                                            icon: const Icon(Icons.copy_rounded, size: 15),
+                                                            color: const Color(0xFF00C9FF).withOpacity(0.8),
                                                             padding: EdgeInsets.zero,
                                                             constraints: const BoxConstraints(),
+                                                            splashRadius: 14,
+                                                            tooltip: '复制网址',
+                                                            onPressed: () async {
+                                                              await Clipboard.setData(ClipboardData(text: u));
+                                                              if (!context.mounted) return;
+                                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                                const SnackBar(
+                                                                  content: Text('已复制网址到剪贴板'),
+                                                                  duration: Duration(seconds: 1),
+                                                                ),
+                                                              );
+                                                            },
+                                                          ),
+                                                          const SizedBox(width: 10),
+                                                          IconButton(
+                                                            icon: const Icon(Icons.remove_circle_outline_rounded, size: 15),
+                                                            color: const Color(0xFFFF5252).withOpacity(0.8),
+                                                            padding: EdgeInsets.zero,
+                                                            constraints: const BoxConstraints(),
+                                                            splashRadius: 14,
+                                                            tooltip: '删除网址',
                                                             onPressed: () async {
                                                               await settings.removeUrlFromGroup(activeGroupId!, u);
                                                               setDialogState(() {});
@@ -825,14 +1076,27 @@ class _CollectorViewState extends State<CollectorView> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        TextButton(
-                          child: const Text('关闭', style: TextStyle(color: Colors.grey)),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25293A),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: const BorderSide(color: Color(0xFF2D3142)),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          ),
                           onPressed: () => Navigator.of(context).pop(),
-                        )
+                          child: const Text(
+                            '关闭',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ],
                     )
                   ],

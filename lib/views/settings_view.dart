@@ -25,6 +25,7 @@ class _SettingsViewState extends State<SettingsView> {
   late TextEditingController _promptSingleController;
   late TextEditingController _promptListController;
   late TextEditingController _networkProxyUrlController;
+  late TextEditingController _maxConcurrencyController;
 
   @override
   void initState() {
@@ -38,6 +39,7 @@ class _SettingsViewState extends State<SettingsView> {
     _promptSingleController = TextEditingController(text: settings.promptSingle);
     _promptListController = TextEditingController(text: settings.promptList);
     _networkProxyUrlController = TextEditingController(text: settings.networkProxyUrl);
+    _maxConcurrencyController = TextEditingController(text: settings.maxConcurrency.toString());
   }
 
   @override
@@ -50,6 +52,7 @@ class _SettingsViewState extends State<SettingsView> {
     _promptSingleController.dispose();
     _promptListController.dispose();
     _networkProxyUrlController.dispose();
+    _maxConcurrencyController.dispose();
     super.dispose();
   }
 
@@ -122,6 +125,7 @@ class _SettingsViewState extends State<SettingsView> {
         promptSingle: _promptSingleController.text,
         promptList: _promptListController.text,
         networkProxyUrl: _networkProxyUrlController.text,
+        maxConcurrency: int.tryParse(_maxConcurrencyController.text) ?? 3,
       );
       _showSnackBar('全部配置已成功保存并同步！', false);
     }
@@ -303,6 +307,36 @@ class _SettingsViewState extends State<SettingsView> {
                                 label: 'HTTP/Socks 代理服务器',
                                 controller: _networkProxyUrlController,
                                 hint: '例如: 127.0.0.1:7890 (留空为直连)',
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        // 采集性能配置卡片
+                        GlassContainer(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Row(
+                                children: [
+                                  Icon(Icons.speed, color: Color(0xFF7F56D9), size: 20),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    '采集性能设置',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const Divider(color: Color(0xFF2E3245), height: 24),
+                              _buildTextField(
+                                label: '最大并发采集数 (1 - 10)',
+                                controller: _maxConcurrencyController,
+                                hint: '推荐设置为 3 (并发过高可能被大模型 API 限制或目标网站封锁IP)',
                               ),
                             ],
                           ),

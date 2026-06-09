@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/article.dart';
 import '../providers/article_provider.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/custom_button.dart';
+import '../services/wechat_format_service.dart';
+
 
 /// 内容库页面 View
 /// 
@@ -23,6 +26,7 @@ class _LibraryViewState extends State<LibraryView> {
   
   // 编辑模式相关控制器
   bool _isEditing = false;
+  bool _isWeChatMode = false;
   late TextEditingController _editTitleController;
   late TextEditingController _editCoverController;
   late TextEditingController _editContentController;
@@ -93,6 +97,7 @@ class _LibraryViewState extends State<LibraryView> {
       _editCoverController.text = _selectedArticle!.coverUrl;
       _editContentController.text = _selectedArticle!.content;
       _isEditing = true;
+      _isWeChatMode = false;
     });
   }
 
@@ -102,6 +107,15 @@ class _LibraryViewState extends State<LibraryView> {
   void _cancelEditing() {
     setState(() {
       _isEditing = false;
+      _isWeChatMode = false;
+    });
+  }
+
+  /// 切换到微信排版模式
+  void _switchToWeChatMode() {
+    setState(() {
+      _isEditing = false;
+      _isWeChatMode = true;
     });
   }
 
@@ -154,6 +168,7 @@ class _LibraryViewState extends State<LibraryView> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       final id = _selectedArticle!.id!;
       final provider = Provider.of<ArticleProvider>(context, listen: false);
       await provider.deleteArticle(id);
@@ -460,6 +475,7 @@ class _LibraryViewState extends State<LibraryView> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       final provider = Provider.of<ArticleProvider>(context, listen: false);
       for (var id in _selectedIds.toList()) {
         await provider.deleteArticle(id);
@@ -646,6 +662,22 @@ class _LibraryViewState extends State<LibraryView> {
                   ),
                   const SizedBox(height: 16),
 
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '内容库共计: ${provider.allArticles.length} 篇',
+                        style: const TextStyle(color: Color(0xFF6C7A9C), fontSize: 11, fontWeight: FontWeight.w500),
+                      ),
+                      if (_searchController.text.isNotEmpty)
+                        Text(
+                          '已筛选: ${provider.articles.length} 篇',
+                          style: const TextStyle(color: Color(0xFF00C9FF), fontSize: 11),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
                   // 文章列表
                   Expanded(
                     child: provider.isLoading
@@ -792,12 +824,27 @@ class _LibraryViewState extends State<LibraryView> {
                                                     Row(
                                                       children: [
                                                         Container(
-                                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                           decoration: BoxDecoration(
                                                             color: article.publishStatus == 1
-                                                                ? const Color(0xFF92FE9D).withOpacity(0.15)
-                                                                : const Color(0xFFFA6262).withOpacity(0.15),
-                                                            borderRadius: BorderRadius.circular(4),
+                                                                ? const Color(0xFF92FE9D).withOpacity(0.12)
+                                                                : const Color(0xFFFA6262).withOpacity(0.12),
+                                                            borderRadius: BorderRadius.circular(20),
+                                                            border: Border.all(
+                                                              color: article.publishStatus == 1
+                                                                  ? const Color(0xFF92FE9D).withOpacity(0.3)
+                                                                  : const Color(0xFFFA6262).withOpacity(0.3),
+                                                              width: 1,
+                                                            ),
+                                                            boxShadow: [
+                                                              BoxShadow(
+                                                                color: (article.publishStatus == 1
+                                                                        ? const Color(0xFF92FE9D)
+                                                                        : const Color(0xFFFA6262))
+                                                                    .withOpacity(0.12),
+                                                                blurRadius: 8,
+                                                              ),
+                                                            ],
                                                           ),
                                                           child: Text(
                                                             article.publishStatus == 1
@@ -809,6 +856,7 @@ class _LibraryViewState extends State<LibraryView> {
                                                                   : const Color(0xFFFA6262),
                                                               fontSize: 10,
                                                               fontWeight: FontWeight.bold,
+                                                              letterSpacing: 0.3,
                                                             ),
                                                           ),
                                                         ),
@@ -869,7 +917,8 @@ class _LibraryViewState extends State<LibraryView> {
                                 // 预览 / 编辑状态按钮
                                 Row(
                                   children: [
-                                    _buildActionTab(text: '详情预览', isActive: !_isEditing, onTap: _cancelEditing),
+                                    _buildActionTab(text: '详情预览', isActive: !_isEditing && !_isWeChatMode, onTap: _cancelEditing),
+                                    _buildActionTab(text: '微信排版', isActive: _isWeChatMode, onTap: _switchToWeChatMode),
                                     _buildActionTab(text: '编辑', isActive: _isEditing, onTap: _startEditing),
                                   ],
                                 ),
@@ -885,6 +934,21 @@ class _LibraryViewState extends State<LibraryView> {
                                       const SizedBox(width: 8),
                                     ],
                                     if (!_isEditing) ...[
+                                      IconButton(
+                                        tooltip: _isWeChatMode ? '复制微信排版' : '复制原始内容',
+                                        icon: Icon(_isWeChatMode ? Icons.content_copy : Icons.copy_all, color: const Color(0xFF00C9FF), size: 18),
+                                        onPressed: () async {
+                                          if (_isWeChatMode) {
+                                            final html = WeChatFormatService.markdownToWeChatHtml(_selectedArticle!.content);
+                                            await WeChatFormatService.copyHtmlToClipboard(html);
+                                            _showSnackBar('已复制微信排版富文本内容，可直接粘贴至微信公众号！', false);
+                                          } else {
+                                            await Clipboard.setData(ClipboardData(text: _selectedArticle!.content));
+                                            _showSnackBar('已复制文章 MarkDown 原始内容到剪贴板！', false);
+                                          }
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
                                       IconButton(
                                         tooltip: '删除该文章',
                                         icon: const Icon(Icons.delete_outline, color: Color(0xFFFA6262), size: 18),
@@ -1035,24 +1099,7 @@ class _LibraryViewState extends State<LibraryView> {
               _launchUrl(href);
             }
           },
-          styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-            p: const TextStyle(color: Color(0xFFD2D7E5), fontSize: 14, height: 1.6),
-            h1: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, height: 2),
-            h2: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, height: 1.8),
-            h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, height: 1.6),
-            code: const TextStyle(
-              color: Color(0xFFFF9D00),
-              backgroundColor: Color(0xFF14161E),
-              fontFamily: 'monospace',
-              fontSize: 12,
-            ),
-            codeblockPadding: const EdgeInsets.all(12),
-            codeblockDecoration: BoxDecoration(
-              color: const Color(0xFF14161E),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF2E3245)),
-            ),
-          ),
+          styleSheet: _isWeChatMode ? _buildWeChatStyleSheet() : _buildDefaultStyleSheet(),
         ),
       ],
     );
@@ -1120,4 +1167,54 @@ class _LibraryViewState extends State<LibraryView> {
       ],
     );
   }
+
+  /// 构建微信排版样式表
+  MarkdownStyleSheet _buildWeChatStyleSheet() {
+    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      p: const TextStyle(color: Color(0xFFD2D7E5), fontSize: 14, height: 1.8, letterSpacing: 0.8),
+      h1: const TextStyle(color: Color(0xFF00b578), fontSize: 20, fontWeight: FontWeight.bold, height: 2.2),
+      h1Align: WrapAlignment.center,
+      h1Padding: const EdgeInsets.only(bottom: 10, top: 16),
+      h2: const TextStyle(color: Color(0xFF00b578), fontSize: 17, fontWeight: FontWeight.bold, height: 2.0),
+      h2Align: WrapAlignment.center,
+      h2Padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+      h3: const TextStyle(color: Color(0xFF00b578), fontSize: 15, fontWeight: FontWeight.bold, height: 1.8),
+      h3Padding: const EdgeInsets.only(top: 16, bottom: 8),
+      code: const TextStyle(
+        color: Color(0xFFFF9D00),
+        backgroundColor: Color(0xFF14161E),
+        fontFamily: 'monospace',
+        fontSize: 12,
+      ),
+      codeblockPadding: const EdgeInsets.all(12),
+      codeblockDecoration: BoxDecoration(
+        color: const Color(0xFF14161E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF2E3245)),
+      ),
+    );
+  }
+
+  /// 构建默认排版样式表
+  MarkdownStyleSheet _buildDefaultStyleSheet() {
+    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      p: const TextStyle(color: Color(0xFFD2D7E5), fontSize: 14, height: 1.6),
+      h1: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, height: 2),
+      h2: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, height: 1.8),
+      h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, height: 1.6),
+      code: const TextStyle(
+        color: Color(0xFFFF9D00),
+        backgroundColor: Color(0xFF14161E),
+        fontFamily: 'monospace',
+        fontSize: 12,
+      ),
+      codeblockPadding: const EdgeInsets.all(12),
+      codeblockDecoration: BoxDecoration(
+        color: const Color(0xFF14161E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF2E3245)),
+      ),
+    );
+  }
+
 }

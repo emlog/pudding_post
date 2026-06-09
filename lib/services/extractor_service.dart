@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:html/parser.dart' as parser;
@@ -292,12 +293,7 @@ class ExtractorService {
         final title = item.querySelector('title')?.text.trim() ?? '未命名文章';
 
         // 2. 提取文章详情链接
-        var link = '';
-        if (isAtom) {
-          link = item.querySelector('link')?.attributes['href'] ?? '';
-        } else {
-          link = item.querySelector('link')?.text.trim() ?? '';
-        }
+        var link = _extractLinkFromItem(item, isAtom);
         if (link.isEmpty) continue;
         link = resolveUrl(baseUrl, link);
 
@@ -347,10 +343,15 @@ class ExtractorService {
     return articles;
   }
 
-  /// 将 HTML 文本极简转换为简洁的 Markdown 排版格式
+  /// 将 HTML 文本极简转换为简洁 of Markdown 排版格式
   /// 
-  /// 遍历 DOM 树节点，将常用的 HTML 排版标签 (h1-h4, p, br, a, img, strong) 对应映射为 Markdown 语法。
-  String htmlToMarkdown(String html) {
+  /// 使用 Isolate 转移至后台计算线程，防止大文本解析堵塞主 UI 线程。
+  Future<String> htmlToMarkdown(String html) async {
+    return await Isolate.run(() => _htmlToMarkdownSync(html));
+  }
+
+  /// 同步转换 HTML 为 Markdown 逻辑，供 Isolate 调用
+  static String _htmlToMarkdownSync(String html) {
     try {
       final document = parser.parse(html);
       final body = document.body;
@@ -430,5 +431,96 @@ class ExtractorService {
     } catch (_) {
       return html;
     }
+  }
+
+  /// 判断抓取到的 HTML 内容是否是一个文章列表页而非单篇文章详情页
+  /// 
+  /// 结合 HTML 文本长度、链接密度以及特定文本标签（如 <p> 标签）的占比来进行启发式评估。
+  bool isListContent(String htmlContent) {
+    if (htmlContent.isEmpty) return false;
+    try {
+      final document = parser.parse(htmlContent);
+      final body = document.body;
+      if (body == null) return false;
+
+      // 1. 提取出所有文本和所有超链接
+      final textLength = body.text.replaceAll(RegExp(r'\s+'), '').length;
+      if (textLength == 0) return false;
+
+      // 2. 统计所有 <a> 标签内文字的长度
+      final aElements = body.querySelectorAll('a');
+      var aTextLength = 0;
+      for (var a in aElements) {
+        aTextLength += a.text.replaceAll(RegExp(r'\s+'), '').length;
+      }
+
+      // 3. 统计 <a> 标签的数量
+      final totalLinks = aElements.length;
+
+      // 4. 链接文本占整个页面文本的占比（Link Density）
+      final linkDensity = aTextLength / textLength;
+
+      // 5. 页面中长段落的数量。详情页通常会有多个含有较长文本的段落（比如包含很多字符的 <p> 标签）
+      final pElements = body.querySelectorAll('p');
+      var longParagraphCount = 0;
+      for (var p in pElements) {
+        if (p.text.trim().length > 80) {
+          longParagraphCount++;
+        }
+      }
+
+      // 启发式逻辑判定：
+      // 如果长段落较少，并且链接总数较多，或者链接文本占比高，则判定为列表页。
+      if (longParagraphCount < 3 && (totalLinks > 15 || linkDensity > 0.45)) {
+        return true;
+      }
+      
+      // 如果链接密度极大（大于 60%），即便有一些长段落，也大概率是列表/导航页
+      if (linkDensity > 0.6) {
+        return true;
+      }
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 兼容提取 RSS 或 Atom 里的链接，突破 HTML 解析器把 link 标签当做自闭合标签的缺陷
+  String _extractLinkFromItem(Element item, bool isAtom) {
+    if (isAtom) {
+      final href = item.querySelector('link')?.attributes['href'] ?? '';
+      if (href.isNotEmpty) return href;
+    }
+    
+    final outerHtml = item.outerHtml;
+    
+    // 1. 优先尝试提取 <link> 标签后面的文本直到下一个标签 < 开始
+    final linkRegExp = RegExp(r'<link[^>]*>([^<]+)', caseSensitive: false);
+    final match = linkRegExp.firstMatch(outerHtml);
+    if (match != null) {
+      final rawLink = match.group(1)?.trim() ?? '';
+      if (rawLink.isNotEmpty) {
+        return rawLink;
+      }
+    }
+    
+    // 2. 尝试匹配 <link href="..." /> (双引号)
+    final hrefDoubleRegExp = RegExp(r'<link[^>]+href="([^"]*)"', caseSensitive: false);
+    final hrefDoubleMatch = hrefDoubleRegExp.firstMatch(outerHtml);
+    if (hrefDoubleMatch != null) {
+      final rawHref = hrefDoubleMatch.group(1)?.trim() ?? '';
+      if (rawHref.isNotEmpty) return rawHref;
+    }
+    
+    // 3. 尝试匹配 <link href='...' /> (单引号)
+    final hrefSingleRegExp = RegExp(r"<link[^>]+href='([^']*)'", caseSensitive: false);
+    final hrefSingleMatch = hrefSingleRegExp.firstMatch(outerHtml);
+    if (hrefSingleMatch != null) {
+      final rawHref = hrefSingleMatch.group(1)?.trim() ?? '';
+      if (rawHref.isNotEmpty) return rawHref;
+    }
+
+    return item.querySelector('link')?.text.trim() ?? '';
   }
 }
