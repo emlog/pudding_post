@@ -34,12 +34,14 @@ jobs:
       - name: Compress macOS App to ZIP
         run: |
           cd build/macos/Build/Products/Release
-          zip -r ../../../../../pudding_post-macos.zip pudding_post.app
+          ARCH=$(uname -m)
+          TAG_NAME="${{ github.ref_name }}"
+          zip -r ../../../../../pudding_post-macos-${ARCH}-${TAG_NAME}.zip pudding_post.app
 
       - name: Upload macOS Artifact to Release
         uses: softprops/action-gh-release@v1
         with:
-          files: pudding_post-macos.zip
+          files: pudding_post-macos-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -68,11 +70,14 @@ jobs:
       - name: Compress Windows App to ZIP
         shell: pwsh
         run: |
-          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath pudding_post-windows.zip
+          $TAG_NAME="${{ github.ref_name }}"
+          $ARCH="x64"
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath pudding_post-windows-${ARCH}-${TAG_NAME}.zip
 
       - name: Upload Windows Artifact to Release
         uses: softprops/action-gh-release@v1
         with:
-          files: pudding_post-windows.zip
+          files: pudding_post-windows-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
