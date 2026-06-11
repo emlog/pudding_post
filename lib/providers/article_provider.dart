@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/article.dart';
 import '../services/database_service.dart';
 import '../services/publish_service.dart';
+import '../services/extractor_service.dart';
+import '../services/llm_service.dart';
+import '../services/translation_service.dart';
 
 /// 内容库中文章管理及发布状态管理 Provider
 /// 
@@ -9,6 +12,9 @@ import '../services/publish_service.dart';
 class ArticleProvider with ChangeNotifier {
   final _db = DatabaseService.instance;
   final _publishService = PublishService();
+  final _extractor = ExtractorService();
+  final _llmService = LlmService();
+  final _translationService = TranslationService();
 
   List<Article> _articles = [];
   List<Article> _filteredArticles = [];
@@ -161,5 +167,125 @@ class ArticleProvider with ChangeNotifier {
       }
     }
     return results;
+  }
+
+  /// 抓取详情：根据文章来源 URL 重新抓取并利用大模型解析正文详情
+  /// 
+  /// 抓取 HTML 后，调用 ExtractorService 与 LlmService 清洗并提炼 Markdown 文章详情与封面图。
+  Future<Article> scrapeArticleDetails(Article article) async {
+    if (article.sourceUrl.isEmpty) {
+      throw Exception('该文章没有可用的来源链接，无法抓取详情。');
+    }
+
+    // 1. 获取代理设置并应用
+    final proxyUrl = await _db.getSetting('network_proxy_url');
+    _extractor.setProxy(proxyUrl);
+
+    // 2. 抓取网页源码
+    final html = await _extractor.fetchHtml(article.sourceUrl, useRandomDelay: false);
+
+    // 3. 清洗 HTML，只保留必要的内容结构
+    final cleanedHtml = await _extractor.cleanHtmlForSingleArticle(html);
+
+    // 4. 调用 LLM 提炼 JSON
+    final promptSingle = await _db.getSetting('prompt_single');
+    final result = await _llmService.extractArticle(cleanedHtml, promptSingle);
+
+    final title = result['title']?.toString() ?? article.title;
+    final content = result['content']?.toString() ?? '';
+    var coverUrl = result['cover_url']?.toString() ?? article.coverUrl;
+
+    if (coverUrl.isNotEmpty) {
+      coverUrl = _extractor.resolveUrl(article.sourceUrl, coverUrl);
+    }
+
+    if (content.trim().isEmpty) {
+      throw Exception('抓取完成，但大模型未在详情页中提取出有效正文内容。');
+    }
+
+    // 5. 自动翻译英文内容
+    String finalTitle = title;
+    String finalContent = content;
+    if (_translationService.isEnglish(content)) {
+      try {
+        finalTitle = await _translationService.translateToChinese(title);
+        finalContent = await _translationService.translateToChinese(content);
+      } catch (_) {
+        // 自动翻译失败则保留原文
+      }
+    }
+
+    // 6. 更新数据库
+    final updatedArticle = article.copyWith(
+      title: finalTitle,
+      content: finalContent,
+      coverUrl: coverUrl,
+    );
+    await updateArticle(updatedArticle);
+
+    return updatedArticle;
+  }
+
+  /// 补充内容：调用大模型对当前文章的内容进行扩写与充实
+  /// 
+  /// 根据提供的文章标题与现有内容/摘要，使用 AI 增强助手进行丰富和扩写。
+  Future<Article> enrichArticleContent(Article article) async {
+    if (article.title.isEmpty) {
+      throw Exception('文章标题不能为空，无法进行扩写。');
+    }
+
+    // 调用 LLM 扩写接口
+    final enrichedContent = await _llmService.enrichContent(article.title, article.content);
+    if (enrichedContent.trim().isEmpty) {
+      throw Exception('大模型扩写返回了空内容。');
+    }
+
+    final updatedArticle = article.copyWith(content: enrichedContent);
+    await updateArticle(updatedArticle);
+
+    return updatedArticle;
+  }
+
+  /// 融合文章：将多篇文章融合为一篇公众号推文，并直接存入内容库中
+  /// 
+  /// 收集选中的文章详情后，调用大模型融合成符合微信公众号排版规范的 Markdown 推文并保存。
+  Future<Article> mergeArticlesIntoWeChat(List<Article> selectedArticles) async {
+    if (selectedArticles.isEmpty) {
+      throw Exception('请选择至少一篇文章进行融合。');
+    }
+
+    // 整理输入文章的标题和内容
+    final List<Map<String, String>> sourceData = selectedArticles.map((art) {
+      return {
+        'title': art.title,
+        'content': art.content,
+      };
+    }).toList();
+
+    // 调用大模型进行融合
+    final result = await _llmService.mergeArticles(sourceData);
+    final title = result['title'] ?? '未命名融合文章';
+    final content = result['content'] ?? '';
+
+    if (content.trim().isEmpty) {
+      throw Exception('大模型融合生成的内容为空。');
+    }
+
+    // 存入数据库
+    final newArticle = Article(
+      title: title,
+      content: content,
+      coverUrl: selectedArticles.first.coverUrl, // 默认使用第一篇的封面图，或留空
+      sourceUrl: '', // 融合文章无来源 URL
+      createdAt: DateTime.now().toLocal().toString().substring(0, 19),
+    );
+
+    final newId = await _db.insertArticle(newArticle);
+    final savedArticle = newArticle.copyWith(id: newId);
+    
+    // 刷新内存列表
+    await loadArticles();
+    
+    return savedArticle;
   }
 }

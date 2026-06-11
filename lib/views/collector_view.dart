@@ -23,6 +23,7 @@ class _CollectorViewState extends State<CollectorView> {
   
   bool _autoPage = true;
   int _maxPages = 3;
+  bool _deepCollect = false;
 
   // 采集模式：0 = 单篇采集，1 = 列表批量采集，2 = 网址分组批量采集
   int _collectMode = 0;
@@ -75,6 +76,7 @@ class _CollectorViewState extends State<CollectorView> {
       await collector.collectGroupUrls(
         urls: currentGroup.urls,
         articleProvider: articleProvider,
+        deepCollect: _deepCollect,
       );
     } else if (_collectMode == 1) {
       // 列表批量采集模式
@@ -92,6 +94,7 @@ class _CollectorViewState extends State<CollectorView> {
         articleProvider: articleProvider,
         autoPage: _autoPage,
         maxPages: _maxPages,
+        deepCollect: _deepCollect,
       );
     } else {
       // 单篇采集模式
@@ -104,7 +107,7 @@ class _CollectorViewState extends State<CollectorView> {
         _showSnackBar('请输入以 http:// 或 https:// 开头的合法网址！', true);
         return;
       }
-      final result = await collector.collectSingleArticle(url, articleProvider);
+      final result = await collector.collectSingleArticle(url, articleProvider, deepCollect: _deepCollect);
       if (result.successCount > 0) {
         _showSnackBar('单篇文章采集入库成功！可前往内容库查看', false);
       } else if (result.skippedCount > 0) {
@@ -342,7 +345,7 @@ class _CollectorViewState extends State<CollectorView> {
                               }).toList(),
                               onChanged: (val) {
                                 setState(() {
-                                    _maxPages = val ?? 3;
+                                  _maxPages = val ?? 3;
                                 });
                               },
                             ),
@@ -351,6 +354,49 @@ class _CollectorViewState extends State<CollectorView> {
                       ),
                     ),
                   ],
+
+                  // 通用采集设置项（是否深入采集详情）
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF14161E).withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF2E3245).withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.psychology, color: Color(0xFF92FE9D), size: 18),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '深入采集文章详情',
+                                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                '若勾选，将深入访问每一篇内容的网页详情页，使用 AI 提取完整正文（注意：此操作可能会消耗更多大模型 Token）',
+                                style: TextStyle(color: Colors.grey, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Checkbox(
+                          value: _deepCollect,
+                          activeColor: const Color(0xFF00C9FF),
+                          checkColor: Colors.black,
+                          onChanged: (val) {
+                            setState(() {
+                              _deepCollect = val ?? false;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
 
                   const SizedBox(height: 20),
 

@@ -7,7 +7,6 @@ import '../models/article.dart';
 import '../providers/article_provider.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/custom_button.dart';
-import '../services/wechat_format_service.dart';
 
 
 /// 内容库页面 View
@@ -26,7 +25,6 @@ class _LibraryViewState extends State<LibraryView> {
   
   // 编辑模式相关控制器
   bool _isEditing = false;
-  bool _isWeChatMode = false;
   late TextEditingController _editTitleController;
   late TextEditingController _editCoverController;
   late TextEditingController _editContentController;
@@ -97,7 +95,6 @@ class _LibraryViewState extends State<LibraryView> {
       _editCoverController.text = _selectedArticle!.coverUrl;
       _editContentController.text = _selectedArticle!.content;
       _isEditing = true;
-      _isWeChatMode = false;
     });
   }
 
@@ -107,15 +104,6 @@ class _LibraryViewState extends State<LibraryView> {
   void _cancelEditing() {
     setState(() {
       _isEditing = false;
-      _isWeChatMode = false;
-    });
-  }
-
-  /// 切换到微信排版模式
-  void _switchToWeChatMode() {
-    setState(() {
-      _isEditing = false;
-      _isWeChatMode = true;
     });
   }
 
@@ -179,6 +167,144 @@ class _LibraryViewState extends State<LibraryView> {
         _isEditing = false;
       });
       _showSnackBar('文章已成功删除！', false);
+    }
+  }
+
+  /// 批量合并选中的文章为一篇微信公众号文章
+  /// 
+  /// 弹出 loading，读取勾选的文章数据，调用 ArticleProvider 合并为一篇全新的文章，并自动选中生成的文章以供预览。
+  Future<void> _batchMergeArticles() async {
+    if (_selectedIds.isEmpty) {
+      _showSnackBar('请先勾选需要融合的文章！', true);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          color: const Color(0xFF1E212A),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00C9FF))),
+                SizedBox(height: 16),
+                Text('AI 正在将选中的文章融合成微信公众号文章，请稍候...', style: TextStyle(color: Colors.white, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final provider = Provider.of<ArticleProvider>(context, listen: false);
+      final articlesToMerge = provider.allArticles.where((art) => _selectedIds.contains(art.id)).toList();
+      final mergedArticle = await provider.mergeArticlesIntoWeChat(articlesToMerge);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading 弹窗
+      
+      setState(() {
+        _isBatchMode = false;
+        _selectedIds.clear();
+        _selectedArticle = mergedArticle; // 自动选中生成的文章以供预览
+      });
+      _showSnackBar('AI文章融合成功！已生成并在列表中选中。', false);
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // 关闭 loading 弹窗
+      _showSnackBar('融合失败: $e', true);
+    }
+  }
+
+  /// 处理单篇文章的详情重新抓取
+  /// 
+  /// 弹出 loading，调用 ArticleProvider 从该文章来源 URL 抓取完整内容，并利用大模型解析提炼正文及封面图。
+  Future<void> _handleScrapeDetails() async {
+    if (_selectedArticle == null) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          color: const Color(0xFF1E212A),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00C9FF))),
+                SizedBox(height: 16),
+                Text('AI 正在抓取并提炼网页详情，请稍候...', style: TextStyle(color: Colors.white, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final provider = Provider.of<ArticleProvider>(context, listen: false);
+      final updated = await provider.scrapeArticleDetails(_selectedArticle!);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      
+      setState(() {
+        _selectedArticle = updated;
+      });
+      _showSnackBar('详情抓取并解析成功！', false);
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // 关闭 loading
+      _showSnackBar('抓取详情失败: $e', true);
+    }
+  }
+
+  /// 处理对单篇文章的AI内容补充与扩写
+  /// 
+  /// 弹出 loading，调用 ArticleProvider 对当前文章的标题和较短内容进行扩充丰富。
+  Future<void> _handleEnrichContent() async {
+    if (_selectedArticle == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: Card(
+          color: const Color(0xFF1E212A),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00C9FF))),
+                SizedBox(height: 16),
+                Text('AI 正在补充与扩写文章内容，请稍候...', style: TextStyle(color: Colors.white, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final provider = Provider.of<ArticleProvider>(context, listen: false);
+      final updated = await provider.enrichArticleContent(_selectedArticle!);
+      
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      
+      setState(() {
+        _selectedArticle = updated;
+      });
+      _showSnackBar('文章内容扩写补充成功！', false);
+    } catch (e) {
+      if (mounted) Navigator.of(context).pop(); // 关闭 loading
+      _showSnackBar('扩写失败: $e', true);
     }
   }
 
@@ -611,6 +737,17 @@ class _LibraryViewState extends State<LibraryView> {
                                   minimumSize: Size.zero,
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                 ),
+                                onPressed: _batchMergeArticles,
+                                icon: const Icon(Icons.auto_awesome_motion, color: Color(0xFF92FE9D), size: 14),
+                                label: const Text('AI融合', style: TextStyle(color: Color(0xFF92FE9D), fontSize: 11)),
+                              ),
+                              const SizedBox(width: 4),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
                                 onPressed: _batchDeleteArticles,
                                 icon: const Icon(Icons.delete_outline, color: Color(0xFFFA6262), size: 14),
                                 label: const Text('删除', style: TextStyle(color: Color(0xFFFA6262), fontSize: 11)),
@@ -917,8 +1054,7 @@ class _LibraryViewState extends State<LibraryView> {
                                 // 预览 / 编辑状态按钮
                                 Row(
                                   children: [
-                                    _buildActionTab(text: '详情预览', isActive: !_isEditing && !_isWeChatMode, onTap: _cancelEditing),
-                                    _buildActionTab(text: '微信排版', isActive: _isWeChatMode, onTap: _switchToWeChatMode),
+                                    _buildActionTab(text: '详情预览', isActive: !_isEditing, onTap: _cancelEditing),
                                     _buildActionTab(text: '编辑', isActive: _isEditing, onTap: _startEditing),
                                   ],
                                 ),
@@ -935,17 +1071,11 @@ class _LibraryViewState extends State<LibraryView> {
                                     ],
                                     if (!_isEditing) ...[
                                       IconButton(
-                                        tooltip: _isWeChatMode ? '复制微信排版' : '复制原始内容',
-                                        icon: Icon(_isWeChatMode ? Icons.content_copy : Icons.copy_all, color: const Color(0xFF00C9FF), size: 18),
+                                        tooltip: '复制原始内容',
+                                        icon: const Icon(Icons.copy_all, color: Color(0xFF00C9FF), size: 18),
                                         onPressed: () async {
-                                          if (_isWeChatMode) {
-                                            final html = WeChatFormatService.markdownToWeChatHtml(_selectedArticle!.content);
-                                            await WeChatFormatService.copyHtmlToClipboard(html);
-                                            _showSnackBar('已复制微信排版富文本内容，可直接粘贴至微信公众号！', false);
-                                          } else {
-                                            await Clipboard.setData(ClipboardData(text: _selectedArticle!.content));
-                                            _showSnackBar('已复制文章 MarkDown 原始内容到剪贴板！', false);
-                                          }
+                                          await Clipboard.setData(ClipboardData(text: _selectedArticle!.content));
+                                          _showSnackBar('已复制文章 MarkDown 原始内容到剪贴板！', false);
                                         },
                                       ),
                                       const SizedBox(width: 8),
@@ -1076,6 +1206,10 @@ class _LibraryViewState extends State<LibraryView> {
         ),
         const Divider(color: Color(0xFF2E3245), height: 32),
 
+        // AI 增强助手面板
+        _buildAiAssistantPanel(),
+        const SizedBox(height: 16),
+
         // 封面大图
         if (_selectedArticle!.coverUrl.isNotEmpty) ...[
           ClipRRect(
@@ -1099,7 +1233,7 @@ class _LibraryViewState extends State<LibraryView> {
               _launchUrl(href);
             }
           },
-          styleSheet: _isWeChatMode ? _buildWeChatStyleSheet() : _buildDefaultStyleSheet(),
+          styleSheet: _buildDefaultStyleSheet(),
         ),
       ],
     );
@@ -1168,32 +1302,6 @@ class _LibraryViewState extends State<LibraryView> {
     );
   }
 
-  /// 构建微信排版样式表
-  MarkdownStyleSheet _buildWeChatStyleSheet() {
-    return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
-      p: const TextStyle(color: Color(0xFFD2D7E5), fontSize: 14, height: 1.8, letterSpacing: 0.8),
-      h1: const TextStyle(color: Color(0xFF00b578), fontSize: 20, fontWeight: FontWeight.bold, height: 2.2),
-      h1Align: WrapAlignment.center,
-      h1Padding: const EdgeInsets.only(bottom: 10, top: 16),
-      h2: const TextStyle(color: Color(0xFF00b578), fontSize: 17, fontWeight: FontWeight.bold, height: 2.0),
-      h2Align: WrapAlignment.center,
-      h2Padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-      h3: const TextStyle(color: Color(0xFF00b578), fontSize: 15, fontWeight: FontWeight.bold, height: 1.8),
-      h3Padding: const EdgeInsets.only(top: 16, bottom: 8),
-      code: const TextStyle(
-        color: Color(0xFFFF9D00),
-        backgroundColor: Color(0xFF14161E),
-        fontFamily: 'monospace',
-        fontSize: 12,
-      ),
-      codeblockPadding: const EdgeInsets.all(12),
-      codeblockDecoration: BoxDecoration(
-        color: const Color(0xFF14161E),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF2E3245)),
-      ),
-    );
-  }
 
   /// 构建默认排版样式表
   MarkdownStyleSheet _buildDefaultStyleSheet() {
@@ -1215,6 +1323,83 @@ class _LibraryViewState extends State<LibraryView> {
         border: Border.all(color: const Color(0xFF2E3245)),
       ),
     );
+  }
+
+  /// 构建 AI 增强工具栏
+  /// 
+  /// 在非微信排版模式且查看非空详情时，提供快速网页详情抓取以及大模型内容扩写补充功能。
+  Widget _buildAiAssistantPanel() {
+    final hasSourceUrl = _selectedArticle!.sourceUrl.isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14161E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF2E3245), width: 1),
+      ),
+      child: Row(
+        children: [
+          const ShaderMask(
+            shaderCallback: _orangeBlueGradient,
+            child: Icon(Icons.psychology, color: Colors.white, size: 24),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'AI 增强助手',
+                  style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hasSourceUrl ? '可为该文章补全抓取网页详情，或扩写内容' : '可为该文章扩写并丰富现有内容',
+                  style: const TextStyle(color: Colors.grey, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // 抓取详情按钮
+          if (hasSourceUrl) ...[
+            ElevatedButton.icon(
+              onPressed: _handleScrapeDetails,
+              icon: const Icon(Icons.download_rounded, size: 14, color: Colors.white),
+              label: const Text('抓取详情', style: TextStyle(fontSize: 12, color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E3245),
+                foregroundColor: Colors.white,
+                shadowColor: Colors.transparent,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // 补充内容按钮
+          ElevatedButton.icon(
+            onPressed: _handleEnrichContent,
+            icon: const Icon(Icons.auto_awesome, size: 14, color: Colors.white),
+            label: const Text('补充内容', style: TextStyle(fontSize: 12, color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E3245),
+              foregroundColor: Colors.white,
+              shadowColor: Colors.transparent,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// AI 增强助手图标的线性渐变色效果函数
+  static Shader _orangeBlueGradient(Rect bounds) {
+    return const LinearGradient(
+      colors: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
+    ).createShader(bounds);
   }
 
 }

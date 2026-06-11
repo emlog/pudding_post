@@ -98,7 +98,7 @@ class CollectorProvider with ChangeNotifier {
   /// 
   /// 抓取单个 URL 页面 HTML，调用大模型分析并写入本地数据库，最后刷新内容库列表。
   /// 返回 CollectResult 结果以便 UI 进行精准的消息提示。
-  Future<CollectResult> collectSingleArticle(String url, ArticleProvider articleProvider) async {
+  Future<CollectResult> collectSingleArticle(String url, ArticleProvider articleProvider, {bool deepCollect = false}) async {
     _isCollecting = true;
     
     // 动态加载并应用网络代理设置，增强抓取兼容性
@@ -114,7 +114,7 @@ class CollectorProvider with ChangeNotifier {
     _addLog('INFO', '开始单篇采集任务，目标 URL: $url');
     
     try {
-      final result = await _processSingleArticleUrl(url, useRandomDelay: false);
+      final result = await _processSingleArticleUrl(url, useRandomDelay: false, deepCollect: deepCollect);
       if (result.successCount > 0) {
         _completedTaskCount = result.successCount;
         _addLog('SUCCESS', '单篇采集完成并已存入数据库！');
@@ -148,6 +148,7 @@ class CollectorProvider with ChangeNotifier {
     required ArticleProvider articleProvider,
     required bool autoPage,
     required int maxPages,
+    bool deepCollect = false,
   }) async {
     _isCollecting = true;
 
@@ -162,7 +163,7 @@ class CollectorProvider with ChangeNotifier {
     notifyListeners();
 
     _addLog('INFO', '开始列表批量采集任务，列表 URL: $listUrl');
-    _addLog('INFO', '配置项：自动翻页 = $autoPage, 最大翻页数 = $maxPages');
+    _addLog('INFO', '配置项：自动翻页 = $autoPage, 最大翻页数 = $maxPages, 深入采集 = $deepCollect');
 
     try {
       final promptList = await _db.getSetting('prompt_list');
@@ -182,7 +183,7 @@ class CollectorProvider with ChangeNotifier {
           // 自动判定并流转 RSS/Atom 订阅源列表解析
           if (_extractor.isRssContent(html)) {
             _addLog('INFO', '检测到列表 URL 为 RSS/Atom 订阅源，自动跳转至结构化解析分支...');
-            await _processSingleArticleUrl(currentUrl, useRandomDelay: false);
+            await _processSingleArticleUrl(currentUrl, useRandomDelay: false, deepCollect: deepCollect);
             await articleProvider.loadArticles();
             _isCollecting = false;
             _currentProcessingUrl = '';
@@ -244,7 +245,7 @@ class CollectorProvider with ChangeNotifier {
           _addLog('INFO', '[任务 #${index + 1}] 正在采集: $targetUrl');
 
           try {
-            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
+            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true, deepCollect: deepCollect);
             _completedTaskCount++;
             if (result.successCount > 0) {
               successCount += result.successCount;
@@ -283,6 +284,7 @@ class CollectorProvider with ChangeNotifier {
   Future<void> collectGroupUrls({
     required List<String> urls,
     required ArticleProvider articleProvider,
+    bool deepCollect = false,
   }) async {
     _isCollecting = true;
 
@@ -318,7 +320,7 @@ class CollectorProvider with ChangeNotifier {
           _addLog('INFO', '[任务 #${index + 1}] 正在处理: $targetUrl');
 
           try {
-            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true);
+            final result = await _processSingleArticleUrl(targetUrl, useRandomDelay: true, deepCollect: deepCollect);
             _completedTaskCount++;
             if (result.successCount > 0) {
               successCount += result.successCount;
@@ -354,7 +356,7 @@ class CollectorProvider with ChangeNotifier {
   /// 封装单篇 URL 的核心处理逻辑（网页抓取 -> 清洗 -> 大模型提取 -> 存入数据库）
   /// 
   /// 供单篇和批量采集方法共同调用。
-  Future<CollectResult> _processSingleArticleUrl(String url, {bool useRandomDelay = false}) async {
+  Future<CollectResult> _processSingleArticleUrl(String url, {bool useRandomDelay = false, bool deepCollect = false}) async {
     // 智能去重拦截逻辑：若库中已存在相同 sourceUrl，则直接跳过
     final isCollected = await _db.isUrlCollected(url);
     if (isCollected) {
@@ -398,9 +400,22 @@ class CollectorProvider with ChangeNotifier {
 
         _addLog('INFO', '开始处理订阅项: $title');
 
-        // 如果正文丰富（全文本 Feed），直接进行本地 Markdown 转化并入库，100% 节省 LLM Token！
-        if (rssContent.length > 500) {
-          final markdownContent = await _extractor.htmlToMarkdown(rssContent);
+        if (deepCollect) {
+          _addLog('INFO', '开启深入详情采集，正在获取 $title 的网页原文...');
+          try {
+            final subResult = await _processSingleArticleUrl(itemUrl, useRandomDelay: true, deepCollect: true);
+            newImportedCount += subResult.successCount;
+            skippedCount += subResult.skippedCount;
+            failedCount += subResult.failedCount;
+          } catch (e) {
+            _addLog('ERROR', '处理订阅子项 $itemUrl 出错: $e');
+            failedCount++;
+          }
+        } else {
+          // 只采集标题和 RSS 提供的内容（直接解析 HTML 为 Markdown 存入，零大模型 Token 消耗）
+          final markdownContent = rssContent.isNotEmpty
+              ? await _extractor.htmlToMarkdown(rssContent)
+              : '';
           final translated = await _translateArticleIfNeeded(title, markdownContent);
           final newArticle = Article(
             title: translated['title']!,
@@ -410,20 +425,8 @@ class CollectorProvider with ChangeNotifier {
             createdAt: DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
           );
           await _db.insertArticle(newArticle);
-          _addLog('SUCCESS', '内容充足！已直接解析 HTML 为 Markdown 存入内容库 (零 Token 消耗)');
+          _addLog('SUCCESS', '解析完毕！已将标题和 RSS 订阅内容存入内容库 (零大模型 Token 消耗)');
           newImportedCount++;
-        } else {
-          // 如果 RSS 只有摘要没有完整正文，则对该具体详情页 URL 发起二次详情采集
-          _addLog('INFO', 'RSS 正文不完整，自动发起网页详情提取...');
-          try {
-            final subResult = await _processSingleArticleUrl(itemUrl, useRandomDelay: true);
-            newImportedCount += subResult.successCount;
-            skippedCount += subResult.skippedCount;
-            failedCount += subResult.failedCount;
-          } catch (e) {
-            _addLog('ERROR', '处理订阅子项 $itemUrl 出错: $e');
-            failedCount++;
-          }
         }
       }
 
