@@ -1,0 +1,78 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS App
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable macOS platform
+        run: flutter config --enable-macos-desktop
+
+      - name: Build macOS App
+        run: flutter build macos --release
+
+      - name: Compress macOS App to ZIP
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../../pudding_post-macos.zip pudding_post.app
+
+      - name: Upload macOS Artifact to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: pudding_post-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: Build Windows App
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable Windows platform
+        run: flutter config --enable-windows-desktop
+
+      - name: Build Windows App
+        run: flutter build windows --release
+
+      - name: Compress Windows App to ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath pudding_post-windows.zip
+
+      - name: Upload Windows Artifact to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: pudding_post-windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
